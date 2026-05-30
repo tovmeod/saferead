@@ -20,6 +20,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install package (zero runtime deps)
         run: uv pip install --system -e .
+      - name: Install test deps
+        run: uv pip install --system 'pytest>=9,<10'
+      - name: Test (pytest)
+        run: python -m pytest -q
       - name: Lint (ruff check)
         run: uvx ruff@0.15.15 check src
       - name: Format check (ruff format --check)
