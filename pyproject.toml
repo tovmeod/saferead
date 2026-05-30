@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "safe-read-hook"
+version = "0.1.0"
+description = "Claude Code PreToolUse hook that auto-approves known-safe read-only shell commands."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/safe_read_hook"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [".venv*", "dist", "*.egg-info", "__pycache__"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ty.environment]
+python-version = "3.11"
