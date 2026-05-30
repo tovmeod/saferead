@@ -9,6 +9,12 @@ description = "Claude Code PreToolUse hook that auto-approves known-safe read-on
 requires-python = ">=3.11"
 dependencies = []
 
+[dependency-groups]
+dev = ["pytest>=9,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/safe_read_hook"]
 
