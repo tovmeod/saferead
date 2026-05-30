@@ -64,7 +64,9 @@ def test_non_bash_tool_emits_nothing() -> None:
 
 
 def test_empty_command_emits_nothing() -> None:
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": ""}, "cwd": "/x"})
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": ""}, "cwd": "/x"}
+    )
     result = _run(payload)
     assert result.returncode == 0
     assert result.stdout.strip() == ""

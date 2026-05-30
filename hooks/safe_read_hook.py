@@ -9,20 +9,31 @@ nothing and exits 0, letting the normal permission flow proceed. The pure core
 (``split_compound`` + ``fold``) stays import-clean and I/O-free.
 
 This entrypoint is NOT wired live this phase — the seed remains the registered
-hook (D-14). It never emits ``"deny"``.
+hook (D-14). It only ever emits allow or ask, never a denial.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
 
-from safe_read_hook.context import Context
-from safe_read_hook.engine import fold
-from safe_read_hook.splitter import split_compound
+# Deploy form is `python3 .../hooks/safe_read_hook.py`, which puts THIS file's
+# directory on sys.path[0]. Because this file is named safe_read_hook.py, it
+# would otherwise shadow the installed `safe_read_hook` PACKAGE — `import
+# safe_read_hook` would find this script (a plain module, not a package) and
+# `safe_read_hook.context` would fail. Drop the script's own directory so the
+# real installed package resolves.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != _HERE]
+
+# These imports MUST follow the sys.path fix above (E402/I001 are intentional).
+from safe_read_hook.context import Context  # noqa: E402
+from safe_read_hook.engine import fold  # noqa: E402
+from safe_read_hook.splitter import split_compound  # noqa: E402
 
 _LOG_FILE = Path("/tmp/claude-hook.log")
 
