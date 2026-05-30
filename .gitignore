@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Git worktrees (per-branch working copies live here)
+.worktrees/
+
+# GSD transient session checkpoint
+.planning/HANDOFF.json
