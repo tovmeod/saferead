@@ -75,17 +75,37 @@ def test_corpus_never_allows(command: str, ctx: Context) -> None:
     assert _decision(command, ctx) != "allow"
 
 
-#: The four confirmed CR-01/CR-02 quoting-evasion false-allows (03-REVIEW.md /
-#: 03-VERIFICATION.md). These are SEPARATE from the verbatim-7 ``_CORPUS`` (which
+#: The confirmed CR-01/CR-02/CR-funsub quoting-evasion false-allows (03-REVIEW.md
+#: / 03-VERIFICATION.md). These are SEPARATE from the verbatim-7 ``_CORPUS`` (which
 #: stays pristine per D-20). CR-01: an odd backslash before a closing single
 #: quote must not over-extend the quoted region across an active ``<(``/``<<<``.
 #: CR-02: a double-quoted ``$(``/backtick is command execution (bash does NOT
 #: disable command substitution inside double quotes) and must not be approved.
+#:
+#: CR-funsub (03-04) appends two distinct pairs:
+#:   * The FUNSUB PAIR (``${ id; }`` / ``${| id; }``) is bash 5.3 command-
+#:     substitution funsub — it EXECUTES the command. This is the genuine
+#:     RED->GREEN that 03-04 delivers: both return ``allow`` BEFORE the reader
+#:     ``_QARG`` allowlist fix and abstain after it.
+#:   * The NESTED PAIR (``${x:-$(id)}`` / ``${x:-`id`}``) is command substitution
+#:     nested in a parameter-expansion default word — the ``:-default`` word
+#:     undergoes command substitution, so the inner ``id`` EXECUTES. These are
+#:     ALREADY closed by CR-02's per-``$`` gating (GREEN today, BEFORE 03-04):
+#:     the ``_QARG`` char class re-gates every ``$``, so the inner ``$(``/backtick
+#:     fails the lookahead and the whole token fails to match. 03-04 does NOT
+#:     close them; it PINS them here as a permanent regression guard so a future
+#:     chunk-match/allowlist refactor that consumed ``${x:-$(id)}`` whole could
+#:     not silently re-open the inner ``$(``. (Both review and verification
+#:     missed enumerating this vector; closure is attributed to CR-02, not 03-04.)
 _QUOTING_EVASIONS = [
     "cat '\\' <(id)",  # CR-01: escaped-quote over-extension hides <(
     "cat '\\' <<<pwned",  # CR-01: escaped-quote over-extension hides <<<
     'cat "$(id)"',  # CR-02: double-quoted command substitution
     'cat "`id`"',  # CR-02: double-quoted backtick command substitution
+    'cat "${ id; }"',  # CR-funsub: bash 5.3 funsub (RED->GREEN in 03-04)
+    'cat "${| id; }"',  # CR-funsub: bash 5.3 pipe-funsub (RED->GREEN in 03-04)
+    'cat "${x:-$(id)}"',  # nested cmdsub in default word (already CR-02; pinned)
+    'cat "${x:-`id`}"',  # nested backtick cmdsub in default word (already CR-02)
 ]
 
 
@@ -107,11 +127,19 @@ def test_quoting_evasions_never_allow(command: str, ctx: Context) -> None:
 #: boundary — variable expansion is not command execution, not a cardinal
 #: failure); ``cat '\\' <(id)`` (EVEN backslash, a literal ``\``) stays abstain
 #: (the closing quote still exits single-quote context so ``<(`` fires).
+#:
+#: The two ``${...}`` baselines lock the funsub discriminator boundary: the char
+#: immediately after ``${`` decides funsub-vs-parameter-expansion. Whitespace or
+#: ``|`` right after ``${`` => funsub (reject); a NAME char or param-operator char
+#: (``#``, letter, digit, ``!``, ``:``, ...) => parameter expansion (allow).
+#: Legitimate parameter expansion NEVER has whitespace or ``|`` right after ``${``.
 _OVER_ABSTAIN_BASELINES = [
     ("cat <(id)", None),
     ('cat "foo bar"', "allow"),
     ('cat "$HOME"', "allow"),
     ("cat '\\\\' <(id)", None),
+    ('cat "${HOME}"', "allow"),  # parameter expansion (NAME char after ${)
+    ('cat "${x:-d}"', "allow"),  # default-value expansion (NAME char after ${)
 ]
 
 
@@ -121,3 +149,83 @@ def test_over_abstain_baselines(
 ) -> None:
     """Guard the CR-01/CR-02 fixes against over-abstaining on inert quoted text."""
     assert _decision(command, ctx) == expected
+
+
+#: Conscious over-abstain coverage losses from the ``$VAR``-allowlist policy
+#: (03-04 AMENDMENT). The reader ``_QARG`` double-quoted alternative admits a
+#: ``$`` ONLY when it begins a recognized parameter/variable expansion. A bare
+#: ``$`` that is NOT the start of such an expansion (``grep "$"`` — a regex
+#: end-of-line anchor; ``cat "$$"`` — the shell PID) no longer matches, so these
+#: SAFE commands now prompt (abstain) instead of auto-approving. This is a
+#: deliberate coverage loss, NOT a cardinal false-allow: abstaining on a safe
+#: command costs a prompt; allowing an unsafe one is the cardinal failure. These
+#: are RED today (they ALLOW under the pre-fix regex) and flip to GREEN (abstain)
+#: with the allowlist — the same RED-first category as the funsub pair. A planned
+#: token-based recognizer phase that replaces this regex can recover them.
+_ALLOWLIST_OVER_ABSTAIN = [
+    'grep "$"',  # regex end-of-line anchor — $ not starting an expansion
+    'cat "$$"',  # shell PID — $ not starting a parameter expansion
+]
+
+
+@pytest.mark.parametrize("command", _ALLOWLIST_OVER_ABSTAIN)
+def test_allowlist_over_abstain(command: str, ctx: Context) -> None:
+    """The ``$VAR``-allowlist policy abstains on a ``$`` not starting an expansion.
+
+    These are SAFE-but-now-prompt coverage losses (see ``_ALLOWLIST_OVER_ABSTAIN``
+    docstring), tracked so the conscious over-abstain is explicit and not a
+    surprise. They are RED before the 03-04 fix (they ``allow``) and GREEN after
+    (they abstain). NOT cardinal holes.
+    """
+    assert _decision(command, ctx) != "allow"
+
+
+#: WR-01 (03-REVIEW.md) disposition: accept-with-rationale + tracking test. An
+#: UNTERMINATED quote is a bash syntax error that never executes — the shell
+#: rejects the line before running anything — so reaching ``allow`` here is NOT a
+#: cardinal false-allow today. The cheap fix (an unbalanced-quote abstain check)
+#: is OUT OF SCOPE for 03-04. This test PINS the documented current behavior so a
+#: FUTURE grammar widening that makes the construct executable trips a tracked
+#: test rather than silently becoming a cardinal hole.
+_UNCLOSED_QUOTE_TODAY = [
+    "cat 'unclosed",
+    'cat "unclosed',
+    "echo 'a b foo c",
+]
+
+
+@pytest.mark.parametrize("command", _UNCLOSED_QUOTE_TODAY)
+def test_unclosed_quote_status_quo(command: str, ctx: Context) -> None:
+    """WR-01: pin the current ``allow`` of an unterminated quote (syntax error).
+
+    Accepted-with-rationale: an unterminated quote is a bash syntax error that
+    never executes, so this is not a cardinal false-allow. Tracked so a future
+    grammar change that makes it executable fails this pin loudly.
+    """
+    assert _decision(command, ctx) == "allow"
+
+
+#: WR-02 (03-REVIEW.md) disposition: cheap regression test. The ``_DISCARD_REDIR``
+#: alternatives (``>/dev/null`` etc.) must each be a COMPLETE token, never a
+#: PREFIX of a real write path. ``>/dev/nullhello`` (extra suffix) and
+#: ``>/dev/null/../etc/passwd`` (path-traversal suffix) are writes to real files
+#: and must NOT be approved. This currently passes (the ``_TAIL`` framing requires
+#: a whitespace/end boundary), but the test makes the implicit token-vs-prefix
+#: invariant explicit so a future ``_TAIL`` / ``_DISCARD_REDIR`` relaxation fails
+#: loudly.
+_DISCARD_REDIR_PREFIX = [
+    "cat foo >/dev/nullhello",
+    "cat foo >/dev/null/../etc/passwd",
+]
+
+
+@pytest.mark.parametrize("command", _DISCARD_REDIR_PREFIX)
+def test_discard_redir_is_complete_token(command: str, ctx: Context) -> None:
+    """WR-02: a discard redirect must be a complete token, never a real-path prefix.
+
+    Locks the ``_DISCARD_REDIR``-is-a-complete-token invariant that currently
+    rests implicitly on ``_TAIL`` framing. A relaxation that let ``>/dev/null``
+    match as a prefix of ``>/dev/null/../etc/passwd`` would re-open a write
+    false-allow; this test fails loudly if that happens.
+    """
+    assert _decision(command, ctx) != "allow"
