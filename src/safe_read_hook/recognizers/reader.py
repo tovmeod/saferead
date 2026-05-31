@@ -50,8 +50,9 @@ from ..verdict import Verdict
 # — a conscious over-abstain (prompt the safe command) traded for the cardinal
 # zero-false-allow guarantee, not a cardinal failure. A token-based recognizer is
 # the planned follow-up phase that replaces this regex entirely.
-# noqa: E501 — the positive-lookahead allowlist must stay on one line (one
-# contiguous regex literal; splitting it would obscure the per-`$` gating).
+# The positive-lookahead allowlist stays on one contiguous regex literal;
+# splitting it would obscure the per-`$` gating. Hence the trailing line-length
+# waiver below.
 _QARG = r"""(?:'[^']*'|"(?:[^"$`]|\$(?=[a-zA-Z_0-9@*#?$!-]|\{[a-zA-Z_0-9@*#?!]))*"|[^;&|`$>\s]+)"""  # noqa: E501
 
 # Redirects that discard output and never write a user file. Safe to keep.
