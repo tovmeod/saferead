@@ -26,7 +26,12 @@ from ..verdict import Verdict
 
 # A single argument token: a quoted string or a run of non-special chars.
 # Crucially excludes ``>`` so a redirect can never be swallowed as an argument.
-_QARG = r"""(?:'[^']*'|"[^"]*"|[^;&|`$>\s]+)"""
+# The double-quoted alternative rejects ``$(`` and backtick (CR-02): bash does
+# NOT disable command substitution inside double quotes, so ``"$(id)"`` /
+# ``"`id`"`` are command execution and must make the segment unrecognized ->
+# fold-veto abstain. Variable expansion (``"$HOME"``, ``"a$b"``) is NOT command
+# execution and stays allowed — the conscious minimal-over-restriction boundary.
+_QARG = r"""(?:'[^']*'|"(?:[^"$`]|\$(?!\())*"|[^;&|`$>\s]+)"""
 
 # Redirects that discard output and never write a user file. Safe to keep.
 _DISCARD_REDIR = r"(?:2>&1|>/dev/null|2>/dev/null|&>>?/dev/null)"

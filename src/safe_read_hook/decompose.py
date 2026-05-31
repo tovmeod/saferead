@@ -72,14 +72,19 @@ def decompose(command: str) -> Decomposition:
     in_single = in_double = in_backtick = False
     while i < n:
         c = command[i]
-        if c == "\\" and i + 1 < n:
-            # Backslash escape suppresses the next char (mirror splitter line 91).
-            i += 2
-            continue
         if in_single:
+            # Bash applies NO escape semantics inside single quotes (CR-01 fix):
+            # evaluate in_single BEFORE the backslash branch so an odd backslash
+            # before the closing quote stays literal and does not over-extend the
+            # quoted region across an active <(/<<. Mirror splitter._strip_comments
+            # ordering (in_single precedes the backslash check).
             if c == "'":
                 in_single = False
             i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            # Backslash escape suppresses the next char (mirror splitter line 91).
+            i += 2
             continue
         if in_double:
             if c == '"':
@@ -115,6 +120,16 @@ def decompose(command: str) -> Decomposition:
         if c == ">" and i + 1 < n and command[i + 1] == "(":
             return Decomposition(
                 segments=[], abstain_reason="process substitution (>()"
+            )
+        # Unquoted command substitution `$(` (CR-02 defense-in-depth ONLY). The
+        # reader `_QARG` fix is the OPERATIVE closer for the QUOTED `cat "$(id)"`
+        # / `cat "`id`"` vectors — those `$(`/backtick sit inside in_double and
+        # never reach this section. This trigger only catches bare unquoted
+        # `cat $(id)` so a future widened reader grammar cannot re-open it. The
+        # unquoted backtick already abstains via the reader's bare-arg exclusion.
+        if c == "$" and i + 1 < n and command[i + 1] == "(":
+            return Decomposition(
+                segments=[], abstain_reason="command substitution ($()"
             )
         i += 1
 

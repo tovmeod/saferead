@@ -11,9 +11,9 @@ entrypoint applies the same triggers on an arbitrary substring (D-19).
 from __future__ import annotations
 
 import pytest
-from safe_read_hook.decompose import Decomposition, decompose
 
 from safe_read_hook.context import Context
+from safe_read_hook.decompose import Decomposition, decompose
 from safe_read_hook.splitter import split_compound
 
 
