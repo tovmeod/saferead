@@ -38,19 +38,21 @@ from ..verdict import Verdict
 # AND any unforeseen ``${X`` OPENER — the allowlist FAILS CLOSED on novel opener
 # syntax rather than admitting it.
 #
-# KNOWN RESIDUAL (CR-@P, accepted 2026-05-31 — do NOT restate this as closed):
-# the lookahead gates only the ``${`` OPENER; ``[^"$`]`` then swallows the brace
-# BODY, so a parameter-transform operator in the body is invisible to the regex.
-# ``${VAR@P}`` re-expands the variable VALUE as a prompt string, performing
-# command substitution — so ``"${x@P}"`` is admitted (``allow``) even though it
-# can execute a ``$(...)`` held in ``VAR``. A regex cannot distinguish dangerous
-# ``${x@P}`` from legitimate ``${arr[@]}`` / ``${@}`` without parsing the
-# ``${...}`` grammar, and a body-operator denylist is the same enumeration
-# treadmill that reopened this phase three times. It is env-conditional
-# (pre-existing hostile var required; in-band assignment is fold-vetoed), pinned
-# as an ``xfail(strict=True)`` must-not-allow in tests/test_corpus.py, and left
-# for the pure-literal policy / token-based recognizer follow-up. See
-# 03-04-REVIEW.md CR-01.
+# KNOWN RESIDUAL CLASS (CR-bodyeval, accepted 2026-05-31 — a CLASS, not one
+# vector; do NOT restate as closed): the lookahead gates only the ``${`` OPENER;
+# ``[^"$`]`` then swallows the brace BODY, so any operator there that
+# re-evaluates the VALUE of a referenced variable is invisible to the regex —
+# and a regex cannot inspect brace-body operators without parsing the ``${...}``
+# grammar. Known members (each executes cmdsub held in a PRE-EXISTING var, with
+# no explicit ``$`` in the string): ``${x@P}`` (the ``@P`` prompt transform
+# re-expands the value as a prompt); ``${s:i}`` / ``${arr[i]}`` (arithmetic
+# substring/subscript recursively evaluate operand ``i``'s contents). The class
+# is NOT provably enumerable by inspection, and a body-operator denylist is the
+# same enumeration treadmill that reopened this phase three times. All members
+# are env-conditional (pre-existing hostile var required; in-band assignment is
+# fold-vetoed), pinned ``xfail(strict=True)`` in tests/test_corpus.py, and left
+# for the PURE-LITERAL policy follow-up (which terminates the class regardless of
+# mechanism — a tokenizer alone does not). See 03-04-REVIEW.md + STATE FOLLOW-UP 1.
 #
 # Per-``$`` gating is the load-bearing invariant: the ``[^"$`]`` char class
 # excludes every ``$``, so each ``$`` inside a ``${...}`` body is independently

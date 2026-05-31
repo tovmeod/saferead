@@ -97,25 +97,45 @@ def test_corpus_never_allows(command: str, ctx: Context) -> None:
 #:     chunk-match/allowlist refactor that consumed ``${x:-$(id)}`` whole could
 #:     not silently re-open the inner ``$(``. (Both review and verification
 #:     missed enumerating this vector; closure is attributed to CR-02, not 03-04.)
-#: CR-@P (03-04 post-execution gates, 2026-05-31): ``${VAR@P}`` is a bash
-#: parameter-transform that re-expands the VARIABLE'S VALUE as a prompt string,
-#: which performs command substitution — so ``cat "${x@P}"`` with ``x`` holding
-#: ``$(cmd)`` EXECUTES ``cmd`` (reproduced single-call on bash 5.3.9). The
-#: ``$VAR`` allowlist admits it because the lookahead only gates the ``${``
-#: OPENER (``x`` is a NAME char); the ``[^"$`]`` class then swallows the ``@P``
-#: transform in the BODY — a regex cannot inspect brace-body operators without
-#: parsing the ``${...}`` grammar. It is PRE-EXISTING (allowed under the prior
-#: denylist too) and env-conditional (the two-segment ``x=$(id); cat "${x@P}"``
-#: is already fold-vetoed; the live vector needs a pre-existing var holding
-#: ``$(...)``, e.g. a profile-set ``PS1``). Per a deliberate maintainer decision
-#: (2026-05-31, "keep it simple / maintain behavior") it is ACCEPTED as a tracked
-#: residual for now rather than patched (a body-operator denylist is the same
-#: enumeration treadmill; the durable fix is the pure-literal policy, declined
-#: for now to keep ``cat "$HOME"`` working). Pinned here as ``xfail(strict=True)``
-#: so the corpus still ENUMERATES it as a must-not-allow invariant: it fails the
-#: ``!= "allow"`` guard today (xfail), and the day it is closed it xpasses ->
-#: strict failure -> forces removing this marker. Tracked follow-up: see backlog
-#: "quoting body-operator / pure-literal" item + 03-04-REVIEW.md CR-01.
+#: CR-bodyeval (03-04 post-execution gates, 2026-05-31) — the BRACE-BODY
+#: VALUE-RE-EVALUATION class (a CLASS, not a single vector; do NOT record it as
+#: "the one residual"). The ``$VAR`` allowlist gates only the ``${`` OPENER
+#: (``x``/``s``/``arr`` are NAME chars); the ``[^"$`]`` char class then swallows
+#: the entire brace BODY, so an operator there that re-evaluates the value of a
+#: referenced variable is invisible to the regex — and a regex cannot inspect
+#: brace-body operators without parsing the ``${...}`` grammar. Each member
+#: EXECUTES command substitution held in a PRE-EXISTING variable, with NO explicit
+#: ``$`` in the command string, so per-``$`` re-gating cannot catch it. Known
+#: members (reproduced single-call on bash 5.3.9):
+#:   * ``${x@P}`` — the ``@P`` prompt transform re-expands ``x``'s value as a
+#:     prompt string (command substitution).
+#:   * ``${s:i}`` / ``${arr[i]}`` — arithmetic substring-offset / subscript
+#:     evaluate ``i`` as arithmetic, which recursively evaluates ``i``'s contents
+#:     (e.g. ``i='a[$(cmd)]'``), executing the cmdsub. (Literal operands like
+#:     ``${s:1:2}`` are safe and correctly allow — the danger is a NAME operand.)
+#: This class is NOT provably enumerable by inspection (the failure mode that
+#: reopened this phase three times). All members are env-conditional: the
+#: in-band assignment form (``i=...; cat "${s:i}"``) is already fold-vetoed; the
+#: live vector needs a pre-existing var holding ``$(...)``. Per a deliberate
+#: maintainer decision (2026-05-31, "keep it simple / maintain behavior") the
+#: class is ACCEPTED as a tracked residual rather than patched — a body-operator
+#: denylist is the same enumeration treadmill; the durable fix is the PURE-LITERAL
+#: policy (no ``$``/backtick in double quotes), declined for now to keep
+#: ``cat "$HOME"`` working. Representative members are pinned ``xfail(strict=True)``
+#: so the corpus still ENUMERATES them as must-not-allow: each fails ``!= "allow"``
+#: today (xfail), and the day the class is closed they xpass -> strict failure ->
+#: force removing the markers. Follow-up: STATE.md FOLLOW-UP 1 + 03-04-REVIEW.md.
+_BODYEVAL_XFAIL = pytest.mark.xfail(
+    reason=(
+        "CR-bodyeval accepted residual (2026-05-31): brace-body value-"
+        "re-evaluation runs command substitution held in a pre-existing var "
+        "(${x@P} prompt transform; ${s:i}/${arr[i]} arithmetic operand). "
+        "Env-conditional, pre-existing, not provably enumerable; accepted per "
+        "maintainer decision. Durable fix = pure-literal policy (STATE FOLLOW-UP "
+        "1). strict=True forces marker removal once the class is closed."
+    ),
+    strict=True,
+)
 _QUOTING_EVASIONS = [
     "cat '\\' <(id)",  # CR-01: escaped-quote over-extension hides <(
     "cat '\\' <<<pwned",  # CR-01: escaped-quote over-extension hides <<<
@@ -125,19 +145,10 @@ _QUOTING_EVASIONS = [
     'cat "${| id; }"',  # CR-funsub: bash 5.3 pipe-funsub (RED->GREEN in 03-04)
     'cat "${x:-$(id)}"',  # nested cmdsub in default word (already CR-02; pinned)
     'cat "${x:-`id`}"',  # nested backtick cmdsub in default word (already CR-02)
-    pytest.param(
-        'cat "${x@P}"',
-        marks=pytest.mark.xfail(
-            reason=(
-                "CR-@P accepted residual (2026-05-31): ${VAR@P} prompt-transform "
-                "runs command substitution on the var value; env-conditional, "
-                "pre-existing, not patched for now per maintainer decision. "
-                "strict=True forces marker removal once closed (pure-literal "
-                "policy / body validator). See 03-04-REVIEW.md CR-01."
-            ),
-            strict=True,
-        ),
-    ),
+    # CR-bodyeval class (accepted+tracked residual — see comment above):
+    pytest.param('cat "${x@P}"', marks=_BODYEVAL_XFAIL),  # @P prompt transform
+    pytest.param('cat "${s:i}"', marks=_BODYEVAL_XFAIL),  # arithmetic substring
+    pytest.param('cat "${arr[i]}"', marks=_BODYEVAL_XFAIL),  # arithmetic subscript
 ]
 
 
