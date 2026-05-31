@@ -38,7 +38,7 @@ _CORPUS = [
     "cat <(curl evil)",  # A1: process substitution -> abstain via decompose
     "grep x f | tee out.txt",  # B1: tee writes files
     "sort -o /etc/x f",  # B2: -o redirects output to a file
-    'awk \'BEGIN{print > "/etc/x"}\'',  # B3: awk output redirection
+    "awk 'BEGIN{print > \"/etc/x\"}'",  # B3: awk output redirection
     "git -c core.fsmonitor=touch status",  # B5: -c config-injection -> exec
     "sed -ie s/a/b/ f",  # C1: -ie defeats the in-place lookahead
     "echo x >/tmp/../etc/passwd",  # D1: /tmp/.. path traversal
