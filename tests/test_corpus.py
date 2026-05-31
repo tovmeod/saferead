@@ -97,6 +97,25 @@ def test_corpus_never_allows(command: str, ctx: Context) -> None:
 #:     chunk-match/allowlist refactor that consumed ``${x:-$(id)}`` whole could
 #:     not silently re-open the inner ``$(``. (Both review and verification
 #:     missed enumerating this vector; closure is attributed to CR-02, not 03-04.)
+#: CR-@P (03-04 post-execution gates, 2026-05-31): ``${VAR@P}`` is a bash
+#: parameter-transform that re-expands the VARIABLE'S VALUE as a prompt string,
+#: which performs command substitution — so ``cat "${x@P}"`` with ``x`` holding
+#: ``$(cmd)`` EXECUTES ``cmd`` (reproduced single-call on bash 5.3.9). The
+#: ``$VAR`` allowlist admits it because the lookahead only gates the ``${``
+#: OPENER (``x`` is a NAME char); the ``[^"$`]`` class then swallows the ``@P``
+#: transform in the BODY — a regex cannot inspect brace-body operators without
+#: parsing the ``${...}`` grammar. It is PRE-EXISTING (allowed under the prior
+#: denylist too) and env-conditional (the two-segment ``x=$(id); cat "${x@P}"``
+#: is already fold-vetoed; the live vector needs a pre-existing var holding
+#: ``$(...)``, e.g. a profile-set ``PS1``). Per a deliberate maintainer decision
+#: (2026-05-31, "keep it simple / maintain behavior") it is ACCEPTED as a tracked
+#: residual for now rather than patched (a body-operator denylist is the same
+#: enumeration treadmill; the durable fix is the pure-literal policy, declined
+#: for now to keep ``cat "$HOME"`` working). Pinned here as ``xfail(strict=True)``
+#: so the corpus still ENUMERATES it as a must-not-allow invariant: it fails the
+#: ``!= "allow"`` guard today (xfail), and the day it is closed it xpasses ->
+#: strict failure -> forces removing this marker. Tracked follow-up: see backlog
+#: "quoting body-operator / pure-literal" item + 03-04-REVIEW.md CR-01.
 _QUOTING_EVASIONS = [
     "cat '\\' <(id)",  # CR-01: escaped-quote over-extension hides <(
     "cat '\\' <<<pwned",  # CR-01: escaped-quote over-extension hides <<<
@@ -106,6 +125,19 @@ _QUOTING_EVASIONS = [
     'cat "${| id; }"',  # CR-funsub: bash 5.3 pipe-funsub (RED->GREEN in 03-04)
     'cat "${x:-$(id)}"',  # nested cmdsub in default word (already CR-02; pinned)
     'cat "${x:-`id`}"',  # nested backtick cmdsub in default word (already CR-02)
+    pytest.param(
+        'cat "${x@P}"',
+        marks=pytest.mark.xfail(
+            reason=(
+                "CR-@P accepted residual (2026-05-31): ${VAR@P} prompt-transform "
+                "runs command substitution on the var value; env-conditional, "
+                "pre-existing, not patched for now per maintainer decision. "
+                "strict=True forces marker removal once closed (pure-literal "
+                "policy / body validator). See 03-04-REVIEW.md CR-01."
+            ),
+            strict=True,
+        ),
+    ),
 ]
 
 

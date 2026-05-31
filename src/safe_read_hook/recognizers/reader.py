@@ -32,10 +32,25 @@ from ..verdict import Verdict
 # special/name/positional char (``[a-zA-Z_0-9@*#?$!-]``) or ``{`` then a
 # name/length/indirect/special char (``[a-zA-Z_0-9@*#?!]``). EVERY other ``$``
 # fails the lookahead, so the whole token fails to match -> fold-veto abstain.
-# This abstains on ALL command substitution inside double quotes (bash does NOT
-# disable it there): ``$(`` (CR-02), ``${ cmd; }`` / ``${| cmd; }`` bash-5.3
-# funsub (CR-funsub), backtick, AND any unforeseen ``${X`` opener — the allowlist
-# FAILS CLOSED on novel syntax rather than admitting it.
+# This abstains on every command substitution whose opener carries a ``$`` or
+# backtick (bash does NOT disable substitution inside double quotes): ``$(``
+# (CR-02), ``${ cmd; }`` / ``${| cmd; }`` bash-5.3 funsub (CR-funsub), backtick,
+# AND any unforeseen ``${X`` OPENER — the allowlist FAILS CLOSED on novel opener
+# syntax rather than admitting it.
+#
+# KNOWN RESIDUAL (CR-@P, accepted 2026-05-31 — do NOT restate this as closed):
+# the lookahead gates only the ``${`` OPENER; ``[^"$`]`` then swallows the brace
+# BODY, so a parameter-transform operator in the body is invisible to the regex.
+# ``${VAR@P}`` re-expands the variable VALUE as a prompt string, performing
+# command substitution — so ``"${x@P}"`` is admitted (``allow``) even though it
+# can execute a ``$(...)`` held in ``VAR``. A regex cannot distinguish dangerous
+# ``${x@P}`` from legitimate ``${arr[@]}`` / ``${@}`` without parsing the
+# ``${...}`` grammar, and a body-operator denylist is the same enumeration
+# treadmill that reopened this phase three times. It is env-conditional
+# (pre-existing hostile var required; in-band assignment is fold-vetoed), pinned
+# as an ``xfail(strict=True)`` must-not-allow in tests/test_corpus.py, and left
+# for the pure-literal policy / token-based recognizer follow-up. See
+# 03-04-REVIEW.md CR-01.
 #
 # Per-``$`` gating is the load-bearing invariant: the ``[^"$`]`` char class
 # excludes every ``$``, so each ``$`` inside a ``${...}`` body is independently
