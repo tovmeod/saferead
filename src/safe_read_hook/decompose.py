@@ -121,15 +121,37 @@ def decompose(command: str) -> Decomposition:
             return Decomposition(
                 segments=[], abstain_reason="process substitution (>()"
             )
-        # Unquoted command substitution `$(` (CR-02 defense-in-depth ONLY). The
-        # reader `_QARG` fix is the OPERATIVE closer for the QUOTED `cat "$(id)"`
-        # / `cat "`id`"` vectors — those `$(`/backtick sit inside in_double and
-        # never reach this section. This trigger only catches bare unquoted
-        # `cat $(id)` so a future widened reader grammar cannot re-open it. The
-        # unquoted backtick already abstains via the reader's bare-arg exclusion.
+        # Unquoted command substitution, defense-in-depth ONLY. The reader
+        # `_QARG` allowlist is the OPERATIVE closer for the QUOTED `cat "$(id)"`
+        # / `cat "`id`"` / `cat "${ id; }"` vectors — those constructs sit inside
+        # in_double and never reach this section. These triggers only catch the
+        # BARE unquoted forms (`cat $(id)`, `cat ${ id; }`) so a future widened
+        # reader grammar cannot re-open the class.
+        #
+        # Coverage layering: `$(` and `${`-funsub are each defended in TWO layers
+        # (this unquoted trigger + the reader `_QARG` exclusion). Backtick is
+        # single-layer (reader-only: the unquoted backtick already abstains via
+        # the reader's bare-arg exclusion, and there is no decompose trigger for
+        # it). The `${`-funsub trigger below matches the SAME whitespace-or-`|`
+        # set as the reader lookahead (`[\s|]`, newline/tab included), so the
+        # backstop never catches LESS than the operative reader fix.
         if c == "$" and i + 1 < n and command[i + 1] == "(":
             return Decomposition(
                 segments=[], abstain_reason="command substitution ($()"
+            )
+        # Unquoted `${`-funsub (bash 5.3 `${ cmd; }` / `${| cmd; }`): `$` `{` then
+        # whitespace-or-`|`. UNQUOTED backstop only — the quoted funsub is closed
+        # by the reader `_QARG` `[\s|]` lookahead, not here. The whitespace test
+        # covers the full whitespace set (newline/tab included) for char-set
+        # parity with the reader lookahead.
+        if (
+            c == "$"
+            and i + 2 < n
+            and command[i + 1] == "{"
+            and (command[i + 2].isspace() or command[i + 2] == "|")
+        ):
+            return Decomposition(
+                segments=[], abstain_reason="command substitution funsub (${ )"
             )
         i += 1
 

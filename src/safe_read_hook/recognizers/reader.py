@@ -26,12 +26,33 @@ from ..verdict import Verdict
 
 # A single argument token: a quoted string or a run of non-special chars.
 # Crucially excludes ``>`` so a redirect can never be swallowed as an argument.
-# The double-quoted alternative rejects ``$(`` and backtick (CR-02): bash does
-# NOT disable command substitution inside double quotes, so ``"$(id)"`` /
-# ``"`id`"`` are command execution and must make the segment unrecognized ->
-# fold-veto abstain. Variable expansion (``"$HOME"``, ``"a$b"``) is NOT command
-# execution and stays allowed — the conscious minimal-over-restriction boundary.
-_QARG = r"""(?:'[^']*'|"(?:[^"$`]|\$(?!\())*"|[^;&|`$>\s]+)"""
+#
+# The double-quoted alternative is a per-``$`` POSITIVE-LOOKAHEAD ALLOWLIST: a
+# ``$`` is admitted ONLY when it begins a parameter/variable expansion — a bare
+# special/name/positional char (``[a-zA-Z_0-9@*#?$!-]``) or ``{`` then a
+# name/length/indirect/special char (``[a-zA-Z_0-9@*#?!]``). EVERY other ``$``
+# fails the lookahead, so the whole token fails to match -> fold-veto abstain.
+# This abstains on ALL command substitution inside double quotes (bash does NOT
+# disable it there): ``$(`` (CR-02), ``${ cmd; }`` / ``${| cmd; }`` bash-5.3
+# funsub (CR-funsub), backtick, AND any unforeseen ``${X`` opener — the allowlist
+# FAILS CLOSED on novel syntax rather than admitting it.
+#
+# Per-``$`` gating is the load-bearing invariant: the ``[^"$`]`` char class
+# excludes every ``$``, so each ``$`` inside a ``${...}`` body is independently
+# re-gated. Nested command substitution ``"${x:-$(id)}"`` stays closed — the
+# inner ``$`` is followed by ``(``, which is in NEITHER allowed set, so the token
+# fails to match. This is NOT a chunk-match of ``${...}`` as one unit (which would
+# never re-gate the inner ``$(``).
+#
+# Variable / parameter expansion (``"$HOME"``, ``"a$b"``, ``"${HOME}"``,
+# ``"${x:-d}"``) is NOT command execution and stays allowed. A bare ``$`` not
+# beginning a recognized expansion (``"$"`` end-anchor, ``"$$"`` PID) now abstains
+# — a conscious over-abstain (prompt the safe command) traded for the cardinal
+# zero-false-allow guarantee, not a cardinal failure. A token-based recognizer is
+# the planned follow-up phase that replaces this regex entirely.
+# noqa: E501 — the positive-lookahead allowlist must stay on one line (one
+# contiguous regex literal; splitting it would obscure the per-`$` gating).
+_QARG = r"""(?:'[^']*'|"(?:[^"$`]|\$(?=[a-zA-Z_0-9@*#?$!-]|\{[a-zA-Z_0-9@*#?!]))*"|[^;&|`$>\s]+)"""  # noqa: E501
 
 # Redirects that discard output and never write a user file. Safe to keep.
 _DISCARD_REDIR = r"(?:2>&1|>/dev/null|2>/dev/null|&>>?/dev/null)"
