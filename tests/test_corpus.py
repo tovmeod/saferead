@@ -73,3 +73,51 @@ def test_corpus_never_allows(command: str, ctx: Context) -> None:
     re-opens any bypass to ``allow`` fails loudly here.
     """
     assert _decision(command, ctx) != "allow"
+
+
+#: The four confirmed CR-01/CR-02 quoting-evasion false-allows (03-REVIEW.md /
+#: 03-VERIFICATION.md). These are SEPARATE from the verbatim-7 ``_CORPUS`` (which
+#: stays pristine per D-20). CR-01: an odd backslash before a closing single
+#: quote must not over-extend the quoted region across an active ``<(``/``<<<``.
+#: CR-02: a double-quoted ``$(``/backtick is command execution (bash does NOT
+#: disable command substitution inside double quotes) and must not be approved.
+_QUOTING_EVASIONS = [
+    "cat '\\' <(id)",  # CR-01: escaped-quote over-extension hides <(
+    "cat '\\' <<<pwned",  # CR-01: escaped-quote over-extension hides <<<
+    'cat "$(id)"',  # CR-02: double-quoted command substitution
+    'cat "`id`"',  # CR-02: double-quoted backtick command substitution
+]
+
+
+@pytest.mark.parametrize("command", _QUOTING_EVASIONS)
+def test_quoting_evasions_never_allow(command: str, ctx: Context) -> None:
+    """The CR-01/CR-02 cardinal regression guard: never silently approve these.
+
+    Always-on ``!= "allow"`` guard over the four reproduced quoting-evasion
+    false-allows. ``None`` (abstain) or any non-``allow`` decision passes; only
+    ``allow`` fails. A regression that re-opens any of these to ``allow`` —
+    silently approving arbitrary command execution — fails loudly here.
+    """
+    assert _decision(command, ctx) != "allow"
+
+
+#: Over-abstain non-regression baselines. The CR-01/CR-02 fixes must NOT make
+#: inert quoted text abstain. ``cat <(id)`` stays abstain (the genuine trigger);
+#: ``cat "foo bar"`` stays allow; ``cat "$HOME"`` stays allow (the conscious
+#: boundary — variable expansion is not command execution, not a cardinal
+#: failure); ``cat '\\' <(id)`` (EVEN backslash, a literal ``\``) stays abstain
+#: (the closing quote still exits single-quote context so ``<(`` fires).
+_OVER_ABSTAIN_BASELINES = [
+    ("cat <(id)", None),
+    ('cat "foo bar"', "allow"),
+    ('cat "$HOME"', "allow"),
+    ("cat '\\\\' <(id)", None),
+]
+
+
+@pytest.mark.parametrize(("command", "expected"), _OVER_ABSTAIN_BASELINES)
+def test_over_abstain_baselines(
+    command: str, expected: str | None, ctx: Context
+) -> None:
+    """Guard the CR-01/CR-02 fixes against over-abstaining on inert quoted text."""
+    assert _decision(command, ctx) == expected

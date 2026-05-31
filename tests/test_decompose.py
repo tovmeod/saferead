@@ -51,6 +51,29 @@ def test_here_constructs_abstain(command: str) -> None:
     assert result.abstain_reason is not None
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat '\\' <(id)",  # CR-01: odd backslash before closing ' vs <(
+        "cat '\\' >(id)",  # CR-01: odd backslash vs >(
+        "cat '\\' <<EOF",  # CR-01: odd backslash vs <<
+        "cat '\\' <<-EOF",  # CR-01: odd backslash vs <<-
+        "cat '\\' <<<x",  # CR-01: odd backslash vs <<<
+    ],
+)
+def test_odd_backslash_in_single_quote_abstains(command: str) -> None:
+    """CR-01 regression: bash applies NO escape inside single quotes.
+
+    An odd backslash before the closing single quote must NOT over-extend the
+    quoted region across an active ``<(``/``>(``/``<<``/``<<-``/``<<<``; the
+    closing ``'`` exits single-quote context so the construct fires its abstain
+    trigger. Asserting ``abstain_reason is not None`` only — the specific
+    construct that fires is not coupled here (reason-string coupling is brittle).
+    """
+    result = decompose(command)
+    assert result.abstain_reason is not None
+
+
 def test_over_length_abstains() -> None:
     command = "cat " + "a" * 70000  # len 70004 > 65536 -> abstain (D-17)
     result = decompose(command)
