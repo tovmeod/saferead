@@ -19,7 +19,6 @@ from safe_read_hook.analyzers import ANALYZERS
 from safe_read_hook.analyzers.python_skeleton import analyze_python
 from safe_read_hook.verdict import Verdict
 
-
 # --- dispatch -------------------------------------------------------------
 
 
