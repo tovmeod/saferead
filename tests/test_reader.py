@@ -64,7 +64,7 @@ def test_reader_cat_is_allow_prover(ctx: Context) -> None:
         "echo x >/tmp/foo",  # redirect to a real file -> no false-allow (999.1 #7)
         "echo x >/tmp/../etc/passwd",  # path-escaping redirect -> no false-allow
         "cat foo.txt > out.txt",  # redirect to a user file -> no false-allow
-        "ls &",  # background control op -> no false-allow (token-rewrite regression guard)
+        "ls &",  # background control op -> no false-allow (rewrite regression guard)
         'cat "$(id)"',  # cmdsub: tokenizer abstains; reader carries no $-logic
         'cat "${x@P}"',  # brace-body transform: tokenizer abstains
         "echo $((1 << 2))",  # arithmetic: tokenizer allowlist holds the abstain
