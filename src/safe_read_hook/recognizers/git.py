@@ -124,15 +124,16 @@ def recognize_git(segment: str, ctx: Context) -> Verdict | None:
 
     # Leading-option scan (D-07, allowlist polarity). Walk options after ``git``
     # and before the subcommand. Only ``-C <path>`` is consumed (the pair is
-    # skipped to reach the subcommand; the path value is NOT retained on the
-    # read-only path — a stored-but-unused local trips ruff F841). Every other
-    # leading ``-...`` token (incl. ``-c``, ``--exec-path``, ``--paginate``,
-    # ``--config-env``, ``--work-tree``, ``--namespace``, bare ``--``) -> abstain.
-    # 05-02 EXTENDS this to CAPTURE last-``-C``-wins effective_cwd for the gated
-    # branch probe — the capture lands with its consumer there, not here.
+    # skipped to reach the subcommand); the path is CAPTURED as last-``-C``-wins
+    # ``effective_cwd`` (default ``ctx.cwd``) for the gated branch probe — the
+    # capture lives here with its consumer below. Every other leading ``-...``
+    # token (incl. ``-c``, ``--exec-path``, ``--paginate``, ``--config-env``,
+    # ``--work-tree``, ``--namespace``, bare ``--``) -> abstain.
+    effective_cwd = ctx.cwd
     i = 1
     while i < len(tokens) and tokens[i].startswith("-"):
         if tokens[i] == "-C" and i + 1 < len(tokens):
+            effective_cwd = tokens[i + 1]  # last -C wins
             i += 2  # consume ``-C`` and its path token
             continue
         return None  # ``-c`` and every other leading option fail closed
@@ -160,10 +161,20 @@ def recognize_git(segment: str, ctx: Context) -> Verdict | None:
     if _is_read_only(sub, args):
         return Verdict("allow", "read-only git", "git")
 
-    # GATED -> Plan 05-02: add/commit/stash(bare|push) get the branch-gate
-    # verdict there. Here on the read-only path they must NOT allow.
+    # GATED branch-gate verdict (D-01/D-02). add/commit/stash(bare|push) are
+    # state-mutating; gate them on the working branch. This is the ONLY place
+    # recognize_git resolves the branch (Pitfall 1 — never on the read-only
+    # path above). The probe is lazy + per-cwd memoized inside ctx.branch.
     if sub in _GATED:
-        return None
+        branch = ctx.branch(effective_cwd)
+        if branch is None:
+            # Detached HEAD / not-a-repo / probe error -> ASK, not abstain
+            # (D-02; Pitfall 4). Treat unknown like protected — fail-safe
+            # visible. Diverges from the seed's abstain.
+            return Verdict("ask", "unresolved branch — approve manually", "git")
+        if branch in _PROTECTED:
+            return Verdict("ask", f"protected branch '{branch}'", "git")
+        return Verdict("allow", f"gated git op on '{branch}'", "git")
 
     return None
 
