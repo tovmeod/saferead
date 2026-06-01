@@ -264,6 +264,31 @@ def test_discard_redir_is_complete_token(command: str, ctx: Context) -> None:
     assert _decision(command, ctx) != "allow"
 
 
+#: CR-01/CR-02 (04-REVIEW) cardinal false-allows, confirmed LIVE through the
+#: ``tokenize -> fold`` path before the 04-04 fix. SEPARATE from the verbatim-7
+#: ``_CORPUS`` (D-20 pristine). ``less /etc/passwd`` reaches command execution
+#: via the ``LESSOPEN``/``lesspipe`` preprocessor; ``file -C -m PATH`` WRITES
+#: ``PATH.mgc`` with no ``>`` redirect (the unique direct-write flag vector).
+#: Both returned ``allow`` before the fix (pager removal + per-command flag
+#: allowlist) and must resolve ``!= "allow"`` after.
+_READER_FLAG_EVASIONS = [
+    "less /etc/passwd",  # CR-01: LESSOPEN/lesspipe decoder execution
+    "file -C -m /tmp/mymagic",  # CR-02: writes /tmp/mymagic.mgc (no redirect)
+]
+
+
+@pytest.mark.parametrize("command", _READER_FLAG_EVASIONS)
+def test_reader_flag_evasions_never_allow(command: str, ctx: Context) -> None:
+    """CR-01/CR-02 cardinal regression guard: never silently approve these.
+
+    Both were confirmed LIVE ``allow`` through the entrypoint before 04-04
+    (pager removal + per-command read-only flag allowlist). A regression that
+    re-opens either to ``allow`` — auto-approving preprocessor execution or a
+    flag-driven file write — fails loudly here.
+    """
+    assert _decision(command, ctx) != "allow"
+
+
 def test_arith_not_allow_live_path(ctx: Context) -> None:
     """CARDINAL (the blocker fix, re-homed from deleted test_decompose.py).
 

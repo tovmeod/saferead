@@ -52,12 +52,16 @@ _DISCARD_REDIR = re.compile(r"(?:2>&1|>/dev/null|2>/dev/null|&>>?/dev/null)")
 _CMD_ECHO = frozenset({"echo", "printf"})
 
 # File-inspection readers — all read-only in bare form.
+#
+# CR-01 (04-REVIEW): ``less``/``more``/``bat`` are DELIBERATELY absent. They are
+# not provably read-only: ``less FILE`` runs the ``LESSOPEN``/``lesspipe`` input
+# preprocessor (external decoders) on the target file, ``bat`` pages through
+# ``less`` and inherits the same exposure, and ``more`` can shell-escape via
+# ``!``/``v``. ``cat``/``head``/``tail``/``nl`` cover the "show a file" use case
+# without spawning a preprocessor.
 _CMD_FILE_READERS = frozenset(
     {
         "cat",
-        "bat",
-        "less",
-        "more",
         "ls",
         "file",
         "stat",
@@ -114,26 +118,178 @@ _READ_ONLY_CMDS = _CMD_ECHO | _CMD_FILE_READERS | _CMD_FILTERS
 #: Embedded-sublanguage launchers recognized as a ``-c "<code>"`` SHAPE only.
 _SUBLANG_CMDS = {"python": "python", "python3": "python"}
 
+#: Per-command read-only OPTION-FLAG allowlist (CR-02, 04-REVIEW). Allowlist BY
+#: FORM: a flag token (starts with ``-``) is permitted ONLY when it appears in
+#: the leading command's entry here; any other flag -> abstain. A command with
+#: NO entry permits BARE FORM ONLY (every ``-flag`` abstains). This enforces the
+#: "read-only in bare form" contract the docstrings claim while preserving
+#: common-flag coverage. Membership is CONSERVATIVE — a flag is included only
+#: when its read-only status is certain for THAT command; when unsure, OMIT
+#: (coverage loss is acceptable, a false-allow is not).
+#:
+#: ``file`` is DELIBERATELY absent: ``file -C -m PATH`` compiles and WRITES
+#: ``PATH.mgc`` with no ``>`` redirect (the unique direct-write vector in the
+#: allowlist). ``file``'s safe surface here is path-only, so every ``file -<f>``
+#: abstains; bare ``file PATH`` stays allow.
+_READ_ONLY_FLAGS: dict[str, frozenset[str]] = {
+    "ls": frozenset(
+        {"-l", "-a", "-la", "-al", "-lh", "-h", "-R", "-t", "-r", "-S", "-1", "--color"}
+    ),
+    "grep": frozenset(
+        {
+            "-i",
+            "-n",
+            "-r",
+            "-R",
+            "-v",
+            "-c",
+            "-l",
+            "-L",
+            "-E",
+            "-F",
+            "-w",
+            "-x",
+            "-H",
+            "-h",
+            "-o",
+            "-A",
+            "-B",
+            "-C",
+            "--color",
+        }
+    ),
+    "egrep": frozenset(
+        {
+            "-i",
+            "-n",
+            "-r",
+            "-R",
+            "-v",
+            "-c",
+            "-l",
+            "-L",
+            "-w",
+            "-x",
+            "-H",
+            "-h",
+            "-o",
+            "-A",
+            "-B",
+            "-C",
+            "--color",
+        }
+    ),
+    "fgrep": frozenset(
+        {
+            "-i",
+            "-n",
+            "-r",
+            "-R",
+            "-v",
+            "-c",
+            "-l",
+            "-L",
+            "-w",
+            "-x",
+            "-H",
+            "-h",
+            "-o",
+            "-A",
+            "-B",
+            "-C",
+            "--color",
+        }
+    ),
+    "rg": frozenset(
+        {
+            "-i",
+            "-n",
+            "-r",
+            "-R",
+            "-v",
+            "-c",
+            "-l",
+            "-L",
+            "-E",
+            "-F",
+            "-w",
+            "-x",
+            "-H",
+            "-h",
+            "-o",
+            "-A",
+            "-B",
+            "-C",
+            "--color",
+        }
+    ),
+    "head": frozenset({"-n", "-c"}),
+    # NOTE: tail's read-only flags are -n/-c only — NOT -f/-F (follow blocks).
+    "tail": frozenset({"-n", "-c"}),
+    "wc": frozenset({"-l", "-w", "-c", "-m", "-L"}),
+    "cut": frozenset({"-d", "-f", "-c"}),  # value-bearing; matched by 2-char head
+    "du": frozenset({"-s", "-h", "-sh", "-a", "-c"}),
+    "df": frozenset({"-h", "-k", "-T"}),
+}
 
-def _tail_is_safe(arg_tokens: list[str]) -> bool:
-    """True iff every trailing token is an ordinary arg or a discard redirect.
+#: Commands whose short flags carry a glued value (e.g. ``cut -d:`` / ``-f1``).
+#: For these, a flag token is matched by its 2-char head (``tok[:2]``) so the
+#: value tail is accepted. Restricted to ``cut`` (no write/exec flag shares the
+#: ``-d``/``-f``/``-c`` prefix for ``cut``); do NOT extend without re-auditing.
+_VALUE_PREFIX_CMDS = frozenset({"cut"})
 
-    A token is rejected (-> abstain) when it carries a ``>`` redirect to a real
-    file or a ``&`` background/control operator: the tokenizer leaves both glued
-    into a word token (it does not separate redirect operators), so the reader
-    inspects token TEXT, not kind. ``;``/``|``/newline already split into
-    separate segments (never a token); ``$``/backtick are tokenizer-gated (we
-    would have abstained on the abstain_reason before reaching here). Only ``>``
-    and ``&`` can survive into a token without an upstream abstain.
+#: head/tail accept the historic ``-NUM`` line-count form (``head -5 f``), which
+#: is genuinely read-only.
+_NUMERIC_FLAG_CMDS = frozenset({"head", "tail"})
+_NUMERIC_FLAG = re.compile(r"-\d+")
 
-    Over-abstains only on a *quoted* ``">"``/``"&"`` argument — a safe coverage
-    loss (prompt the command), never a cardinal false-allow.
+
+def _flag_is_read_only(cmd: str, tok: str) -> bool:
+    """True iff option-flag ``tok`` is on ``cmd``'s read-only flag allowlist.
+
+    A command with no ``_READ_ONLY_FLAGS`` entry permits NO flags (bare form
+    only). head/tail also accept the historic ``-NUM`` form. ``cut``'s
+    value-bearing short flags (``-d:``/``-f1``) match by their 2-char head.
+    """
+    if cmd in _NUMERIC_FLAG_CMDS and _NUMERIC_FLAG.fullmatch(tok):
+        return True
+    allowed = _READ_ONLY_FLAGS.get(cmd)
+    if allowed is None:
+        return False
+    if tok in allowed:
+        return True
+    # Value-bearing short flag: accept the 2-char head (e.g. ``-d:`` -> ``-d``)
+    # only when the command opted into prefix matching.
+    if cmd in _VALUE_PREFIX_CMDS and len(tok) > 2 and tok[:2] in allowed:
+        return True
+    return False
+
+
+def _tail_is_safe(cmd: str, arg_tokens: list[str]) -> bool:
+    """True iff every trailing token is a safe arg, flag, or discard redirect.
+
+    Fences retained from the seed: a discard redirect (``>/dev/null`` etc.)
+    ``fullmatch`` is permitted; a token carrying a ``>`` redirect to a real file
+    or a ``&`` background/control operator -> abstain (the tokenizer leaves both
+    glued into a word token, so the reader inspects token TEXT).
+
+    CR-02 flag policy: a token that LOOKS like an option flag (starts with
+    ``-``, excluding bare ``-``/``--``) -> abstain UNLESS it is on ``cmd``'s
+    read-only flag allowlist (``_flag_is_read_only``). A bare value/path token
+    is permitted. Commands with no allowlist entry permit bare form only.
+
+    Over-abstains only on a *quoted* ``">"``/``"&"`` argument or an unlisted
+    flag — a safe coverage loss (prompt the command), never a false-allow.
     """
     for tok in arg_tokens:
         if _DISCARD_REDIR.fullmatch(tok):
             continue
         if ">" in tok or "&" in tok:
             return False
+        if tok.startswith("-") and tok not in ("-", "--"):
+            if not _flag_is_read_only(cmd, tok):
+                return False
+            continue
     return True
 
 
@@ -170,7 +326,7 @@ def recognize_reader(segment: str, ctx: Context) -> Verdict | None:
     if cmd not in _READ_ONLY_CMDS:
         return None
 
-    if not _tail_is_safe(args):
+    if not _tail_is_safe(cmd, args):
         return None
 
     return Verdict("allow", "read-only command", "reader")

@@ -35,6 +35,15 @@ def ctx() -> Context:
         "ls -la",
         "echo hi >/dev/null",
         "grep x f 2>&1",
+        # CR-02: common safe-flag reads stay allow via the per-command allowlist.
+        "grep -i needle f",
+        "head -n 5 f",
+        "tail -n 20 f",
+        "df -h",
+        "du -sh d",
+        "cut -d: -f1 f",  # value-bearing short flags (2-char-head match)
+        "tail -5 f",  # historic -NUM line-count form
+        "file /etc/hosts",  # bare file PATH stays allow
     ],
 )
 def test_reader_allows_read_only(segment: str, ctx: Context) -> None:
@@ -77,6 +86,55 @@ def test_reader_abstains(segment: str, ctx: Context) -> None:
 def test_reader_abstains_on_rm(ctx: Context) -> None:
     """The cardinal no-match: rm -rf x -> None (feeds the engine abstain-veto)."""
     assert recognize_reader("rm -rf x", ctx) is None
+
+
+# --- CR-01: pagers removed from the read-only allowlist -------------------
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "less /etc/passwd",  # LESSOPEN/lesspipe preprocessor exec (live vector)
+        "less f",
+        "more f",  # ! / v interactive shell-escape
+        "bat f",  # pages via less -> inherits LESSOPEN exposure
+    ],
+)
+def test_reader_abstains_on_pagers(segment: str, ctx: Context) -> None:
+    """CR-01: less/more/bat are no longer claimed -> abstain (not read-only)."""
+    assert recognize_reader(segment, ctx) is None
+
+
+# --- CR-02: write/exec-capable flags abstain ------------------------------
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "file -C -m /tmp/mymagic",  # writes /tmp/mymagic.mgc (live vector)
+        "file -m /tmp/x",
+        "file -s /dev/sda",
+        "file -C f",  # any file -<flag> abstains (file = bare form only)
+    ],
+)
+def test_reader_abstains_on_file_flags(segment: str, ctx: Context) -> None:
+    """CR-02: `file` has no read-only flag entry -> every `file -<flag>` abstains."""
+    assert recognize_reader(segment, ctx) is None
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "cat --definitely-not-a-real-flag f",  # unknown long flag
+        "cat -x f",  # unknown short flag (cat has no flag entry)
+        "tail -f f",  # follow blocks — NOT on tail's read-only list
+        "ls -Z",  # unknown flag for ls
+        "grep --binary-files=text f",  # unlisted long flag for grep
+    ],
+)
+def test_reader_abstains_on_unknown_flag(segment: str, ctx: Context) -> None:
+    """CR-02: a flag NOT on the command's read-only allowlist -> abstain."""
+    assert recognize_reader(segment, ctx) is None
 
 
 def test_reader_discard_redirect_stays_allow(ctx: Context) -> None:
