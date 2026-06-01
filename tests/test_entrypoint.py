@@ -79,7 +79,7 @@ def test_malformed_json_emits_nothing_and_does_not_crash() -> None:
 
 
 def test_process_sub_payload_emits_nothing() -> None:
-    """Live A1 closure: cat <(curl evil) routes through decompose -> abstain.
+    """Live A1 closure: cat <(curl evil) routes through tokenize -> abstain.
 
     The structural <( trigger fires on the raw string in the live pipeline (not
     just a unit test), so the entrypoint emits nothing (CORE-02/D-15).
