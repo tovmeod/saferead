@@ -7,12 +7,27 @@ whole vertical slice: stdin -> split -> fold -> envelope.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 _HOOK = Path(__file__).resolve().parent.parent / "hooks" / "safe_read_hook.py"
+
+
+def _load_entrypoint_module():
+    """Import hooks/safe_read_hook.py as a module WITHOUT running main().
+
+    The script guards its ``main()`` call behind ``if __name__ == '__main__'``,
+    so importing it under a non-``__main__`` name loads the module (and its
+    ``_resolve_branch`` resolver) without firing a live subprocess.
+    """
+    spec = importlib.util.spec_from_file_location("_entrypoint_under_test", _HOOK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _run(payload: str) -> subprocess.CompletedProcess[str]:
@@ -76,6 +91,44 @@ def test_malformed_json_emits_nothing_and_does_not_crash() -> None:
     result = _run("{not valid json")
     assert result.returncode == 0
     assert result.stdout.strip() == ""
+
+
+def test_entrypoint_injects_real_branch_resolver(monkeypatch) -> None:
+    """The entrypoint builds Context with ``_resolver=_resolve_branch`` (D-03).
+
+    Imports the entrypoint module (main() guarded, not auto-run), captures the
+    ``_resolver`` kwarg the entrypoint passes to Context on a Bash payload, and
+    asserts it IS the real ``_resolve_branch`` resolver. No live subprocess —
+    the resolver is never called, only its identity is checked.
+    """
+    module = _load_entrypoint_module()
+    captured: dict[str, object] = {}
+
+    def _capture_context(*, cwd, _resolver):
+        captured["resolver"] = _resolver
+        # Return a dummy whose tokenize/fold path the entrypoint won't exercise
+        # meaningfully — but it still calls fold(), so hand back a real Context.
+        return module.Context(cwd=cwd, _resolver=_resolver)
+
+    monkeypatch.setattr(module, "Context", _capture_context)
+
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+        "cwd": "/x",
+    }
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    module.main()
+
+    assert captured["resolver"] is module._resolve_branch
+
+
+class _StdinStub:
+    def __init__(self, data: str) -> None:
+        self._data = data
+
+    def read(self) -> str:
+        return self._data
 
 
 def test_process_sub_payload_emits_nothing() -> None:

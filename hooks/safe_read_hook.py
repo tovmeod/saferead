@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import traceback
 from datetime import datetime
@@ -55,6 +56,30 @@ except Exception:
     sys.exit(0)
 
 
+def _resolve_branch(cwd: str | None) -> str | None:
+    """Resolve the current git branch for ``cwd`` (the real D-03 resolver).
+
+    Runs ``git branch --show-current`` as an argv list (``shell=False`` — no
+    shell, no command injection via a crafted cwd; threat T-05-06). Empty stdout
+    (detached HEAD) -> None. Any error (not-a-repo / timeout / probe failure) is
+    swallowed -> None, upholding the CORE-06 never-crash contract. Injected at
+    Context construction so the recognizer never shells out. Memoized per-cwd by
+    Context.branch — at most one bounded (<=2s) probe per distinct cwd.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        )
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
 def main() -> None:
     """Read a PreToolUse payload from stdin and emit a decision envelope, or nothing."""
     try:
@@ -69,7 +94,7 @@ def main() -> None:
         command = payload.get("tool_input", {}).get("command", "")
         if not isinstance(command, str) or not command:
             return
-        ctx = Context(cwd=payload.get("cwd"))
+        ctx = Context(cwd=payload.get("cwd"), _resolver=_resolve_branch)
         result = tokenize(command)
         if result.abstain_reason is not None:
             return  # structural/over-length/allowlist trigger — abstain (D-15)
@@ -91,4 +116,10 @@ def main() -> None:
         log("uncaught exception:\n" + traceback.format_exc())
 
 
-main()
+# Deploy runs this file as a script (`python3 .../safe_read_hook.py`), so
+# `__name__ == "__main__"` still fires — runtime behavior is unchanged. The
+# guard only stops `main()` auto-running when the entrypoint is imported (the
+# wiring test imports `_resolve_branch`/`main` to assert the Context resolver
+# identity without firing a live subprocess).
+if __name__ == "__main__":
+    main()

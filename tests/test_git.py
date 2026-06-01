@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from safe_read_hook.context import Context
+from safe_read_hook.engine import fold
 from safe_read_hook.recognizers import REGISTRY, recognize_reader
 from safe_read_hook.recognizers.git import recognize_git
 from safe_read_hook.verdict import Verdict
@@ -322,6 +323,51 @@ def test_git_gated_path_only_readonly_no_probe() -> None:
     assert verdict is not None
     assert verdict.decision == "allow"
     assert verdict.tag == "git"
+
+
+# --- probe-counting: memoization + D-08 fold reconciliation ---------------
+#
+# The branch probe is lazy + per-cwd memoized in Context, and the engine fold
+# short-circuits on an unrecognized segment. These tests pin the D-08 sign-off:
+# same-cwd add&&commit probes ONCE; unrecognized-first probes ZERO; gated-first
+# then unrecognized pays EXACTLY ONE discarded probe (accepted residual). Use a
+# counting fake resolver — NO real subprocess.
+
+
+def test_git_memoizes_one_probe_per_cwd() -> None:
+    """``git add`` then ``git commit`` on the SAME ctx probes exactly once (D-08)."""
+    calls: list[str | None] = []
+    ctx = Context(cwd="/x", _resolver=lambda c: calls.append(c) or "main")
+    recognize_git("git add .", ctx)
+    recognize_git("git commit -m x", ctx)
+    assert len(calls) == 1
+
+
+def test_git_short_circuit_zero_probe() -> None:
+    """Unrecognized-first (``rm -rf x && git commit``) -> veto, ZERO probes (D-08).
+
+    The engine short-circuits on the first unrecognized segment, so the git
+    recognizer never runs and the resolver is never called.
+    """
+    calls: list[str | None] = []
+    ctx = Context(cwd="/x", _resolver=lambda c: calls.append(c) or "feature/foo")
+    result = fold(["rm -rf x", "git commit -m x"], ctx)
+    assert result is None
+    assert len(calls) == 0
+
+
+def test_git_gated_first_one_discarded_probe() -> None:
+    """Gated-first then unrecognized -> abstain-veto, EXACTLY ONE discarded probe.
+
+    D-08 accepted reconciled residual: the gated segment fires one bounded probe
+    before the later unrecognized segment vetoes (None). NOT a bug — the
+    lazy-.decision "no probe" trick is a rejected false fix (RESEARCH Pattern 1).
+    """
+    calls: list[str | None] = []
+    ctx = Context(cwd="/x", _resolver=lambda c: calls.append(c) or "feature/foo")
+    result = fold(["git commit -m x", "definitelyunrecognizedcmd"], ctx)
+    assert result is None
+    assert len(calls) == 1
 
 
 # --- non-git / bare git abstain -------------------------------------------
