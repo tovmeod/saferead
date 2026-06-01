@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import pytest
 
+from safe_read_hook.analyzers import ANALYZERS
 from safe_read_hook.context import Context
 from safe_read_hook.recognizers.reader import recognize_reader
+from safe_read_hook.verdict import Verdict
 
 
 @pytest.fixture
@@ -62,6 +64,10 @@ def test_reader_cat_is_allow_prover(ctx: Context) -> None:
         "echo x >/tmp/foo",  # redirect to a real file -> no false-allow (999.1 #7)
         "echo x >/tmp/../etc/passwd",  # path-escaping redirect -> no false-allow
         "cat foo.txt > out.txt",  # redirect to a user file -> no false-allow
+        "ls &",  # background control op -> no false-allow (token-rewrite regression guard)
+        'cat "$(id)"',  # cmdsub: tokenizer abstains; reader carries no $-logic
+        'cat "${x@P}"',  # brace-body transform: tokenizer abstains
+        "echo $((1 << 2))",  # arithmetic: tokenizer allowlist holds the abstain
     ],
 )
 def test_reader_abstains(segment: str, ctx: Context) -> None:
@@ -78,3 +84,27 @@ def test_reader_discard_redirect_stays_allow(ctx: Context) -> None:
     verdict = recognize_reader("echo hi >/dev/null", ctx)
     assert verdict is not None
     assert verdict.decision == "allow"
+
+
+# --- analyzer dispatch seam (TOK-03) --------------------------------------
+
+
+def test_reader_dispatches_python_to_analyzer(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``python -c "<code>"`` shape ROUTES the source to ANALYZERS["python"].
+
+    Proves the seam FIRES (not merely that the shape abstains): the stub
+    analyzer returns a sentinel Verdict, and the reader must return exactly
+    that — observable only if dispatch actually occurred. The production
+    skeleton returns None, so a real ``python -c`` shape abstains.
+    """
+    sentinel = Verdict("allow", "stub-dispatch", "test.analyzer")
+    monkeypatch.setitem(ANALYZERS, "python", lambda source: sentinel)
+    verdict = recognize_reader('python -c "import os"', ctx)
+    assert verdict is sentinel
+
+
+def test_reader_python_shape_abstains_with_skeleton(ctx: Context) -> None:
+    """With the real skeleton (returns None), a python -c shape -> abstain."""
+    assert recognize_reader('python -c "import os"', ctx) is None
