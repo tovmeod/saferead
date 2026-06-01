@@ -28,7 +28,6 @@ import pytest
 
 from safe_read_hook.tokenizer import TokenizeResult, tokenize
 
-
 # --- segmentation -------------------------------------------------------------
 
 
