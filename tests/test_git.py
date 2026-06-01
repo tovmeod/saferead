@@ -211,7 +211,18 @@ def test_git_discard_redirect_readonly_allows(segment: str, ctx: Context) -> Non
     assert verdict.tag == "git"
 
 
-# --- transitional gated pins (gated path lands in 05-02) -------------------
+# --- gated branch-gate verdict (05-02) ------------------------------------
+#
+# Test-name contract (load-bearing): the Task 1 ``-k "gated or unresolved"``
+# filter selects on the substrings ``gated`` and ``unresolved``. EVERY gated/
+# unresolved test below MUST contain one of those substrings, or it is silently
+# NOT run (and a filter substring matching zero tests false-passes via pytest
+# exit 5). Deterministic fixed-return fake ``_resolver`` — NO real subprocess.
+
+
+def _fail_if_called(_cwd: str | None) -> str | None:
+    """A resolver that must NEVER run on the read-only path (Pitfall 1)."""
+    raise AssertionError("branch resolver called on the read-only path")
 
 
 @pytest.mark.parametrize(
@@ -219,16 +230,98 @@ def test_git_discard_redirect_readonly_allows(segment: str, ctx: Context) -> Non
     [
         "git commit -m x",
         "git add .",
-        "git stash",  # bare stash is GATED, not read-only
-        "git stash push",
     ],
 )
-def test_git_gated_forms_abstain(segment: str, ctx: Context) -> None:
-    """05-01 does NOT implement the gated branch-gate verdict -> abstain.
+def test_git_gated_asks_on_protected(segment: str) -> None:
+    """A gated add/commit on a protected branch (master/main) -> ask (D-01)."""
+    ctx = Context(cwd="/x", _resolver=lambda _c: "main")
+    verdict = recognize_git(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert verdict.tag == "git"
 
-    05-02 replaces these with branch-gate (allow/ask) tests.
+
+@pytest.mark.parametrize(
+    ("segment", "branch"),
+    [
+        ("git commit -m x", "feature/foo"),
+        ("git add .", "feature/x"),
+    ],
+)
+def test_git_gated_allows_on_feature(segment: str, branch: str) -> None:
+    """A gated add/commit on a feature branch -> allow (D-01)."""
+    ctx = Context(cwd="/x", _resolver=lambda _c: branch)
+    verdict = recognize_git(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "git"
+
+
+def test_git_gated_stash_asks_on_protected() -> None:
+    """Bare ``git stash`` is GATED: ask on protected, allow on feature.
+
+    ``git stash list``/``stash show`` stay on the 05-01 read-only path and must
+    NOT probe the branch (re-pinned here with a fail-if-called resolver).
     """
-    assert recognize_git(segment, ctx) is None
+    ask_ctx = Context(cwd="/x", _resolver=lambda _c: "main")
+    ask_v = recognize_git("git stash", ask_ctx)
+    assert ask_v is not None
+    assert ask_v.decision == "ask"
+    assert ask_v.tag == "git"
+
+    allow_ctx = Context(cwd="/x", _resolver=lambda _c: "feature")
+    allow_v = recognize_git("git stash", allow_ctx)
+    assert allow_v is not None
+    assert allow_v.decision == "allow"
+
+    # stash list is read-only — never probes the branch.
+    ro_ctx = Context(cwd="/x", _resolver=_fail_if_called)
+    ro_v = recognize_git("git stash list", ro_ctx)
+    assert ro_v is not None
+    assert ro_v.decision == "allow"
+
+
+def test_git_unresolved_branch_asks() -> None:
+    """A gated write whose branch is unresolvable (None) -> ask, NOT abstain.
+
+    D-02 (Pitfall 4): detached HEAD / not-a-repo / probe error -> resolver
+    returns None -> treat unknown like protected -> ASK (fail-safe visible).
+    Diverges from the seed's abstain.
+    """
+    ctx = Context(cwd="/x", _resolver=lambda _c: None)
+    verdict = recognize_git("git commit -m x", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert verdict.tag == "git"
+    assert "unresolved" in verdict.reason
+
+
+def test_git_gated_dash_C_probes_effective_cwd() -> None:
+    """``git -C /p commit`` gates against THAT cwd's branch (last-C-wins)."""
+    seen: list[str | None] = []
+
+    def _capture(cwd: str | None) -> str | None:
+        seen.append(cwd)
+        return "main"
+
+    ctx = Context(cwd="/default", _resolver=_capture)
+    verdict = recognize_git("git -C /p commit -m x", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert seen == ["/p"]
+
+
+def test_git_gated_path_only_readonly_no_probe() -> None:
+    """The read-only path NEVER resolves the branch (Pitfall 1).
+
+    ``git status`` allows without ever calling the resolver — the gated branch
+    is the ONLY place recognize_git touches ctx.branch.
+    """
+    ctx = Context(cwd="/x", _resolver=_fail_if_called)
+    verdict = recognize_git("git status", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "git"
 
 
 # --- non-git / bare git abstain -------------------------------------------
