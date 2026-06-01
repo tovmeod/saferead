@@ -30,8 +30,8 @@ from __future__ import annotations
 import pytest
 
 from safe_read_hook.context import Context
-from safe_read_hook.decompose import decompose
 from safe_read_hook.engine import fold
+from safe_read_hook.tokenizer import tokenize
 
 #: The seven reproduced seed bypasses, VERBATIM from PITFALLS.md (D-20).
 _CORPUS = [
@@ -51,16 +51,17 @@ def ctx() -> Context:
 
 
 def _decision(command: str, ctx: Context) -> str | None:
-    """Run the decompose-wrapped pipeline, returning the verdict's decision.
+    """Run the tokenize-wrapped pipeline, returning the verdict's decision.
 
-    Returns ``None`` when the compound abstains — either because decompose
-    surfaced an abstain trigger (A1's ``<(``) or because the fold's segment-veto
-    left it unrecognized. Otherwise returns the folded verdict's ``.decision``.
+    Returns ``None`` when the compound abstains — either because tokenize
+    surfaced an abstain trigger (A1's ``<(``; the safe-expansion allowlist on a
+    non-read-only ``$``-form) or because the fold's segment-veto left it
+    unrecognized. Otherwise returns the folded verdict's ``.decision``.
     """
-    decomposition = decompose(command)
-    if decomposition.abstain_reason is not None:
+    result = tokenize(command)
+    if result.abstain_reason is not None:
         return None
-    verdict = fold(decomposition.segments, ctx)
+    verdict = fold(result.segments, ctx)
     return None if verdict is None else verdict.decision
 
 
@@ -114,41 +115,29 @@ def test_corpus_never_allows(command: str, ctx: Context) -> None:
 #:     (e.g. ``i='a[$(cmd)]'``), executing the cmdsub. (Literal operands like
 #:     ``${s:1:2}`` are safe and correctly allow — the danger is a NAME operand.)
 #: This class is NOT provably enumerable by inspection (the failure mode that
-#: reopened this phase three times). All members are env-conditional: the
-#: in-band assignment form (``i=...; cat "${s:i}"``) is already fold-vetoed; the
-#: live vector needs a pre-existing var holding ``$(...)``. Per a deliberate
-#: maintainer decision (2026-05-31, "keep it simple / maintain behavior") the
-#: class is ACCEPTED as a tracked residual rather than patched — a body-operator
-#: denylist is the same enumeration treadmill; the durable fix is the PURE-LITERAL
-#: policy (no ``$``/backtick in double quotes), declined for now to keep
-#: ``cat "$HOME"`` working. Representative members are pinned ``xfail(strict=True)``
-#: so the corpus still ENUMERATES them as must-not-allow: each fails ``!= "allow"``
-#: today (xfail), and the day the class is closed they xpass -> strict failure ->
-#: force removing the markers. Follow-up: STATE.md FOLLOW-UP 1 + 03-04-REVIEW.md.
-_BODYEVAL_XFAIL = pytest.mark.xfail(
-    reason=(
-        "CR-bodyeval accepted residual (2026-05-31): brace-body value-"
-        "re-evaluation runs command substitution held in a pre-existing var "
-        "(${x@P} prompt transform; ${s:i}/${arr[i]} arithmetic operand). "
-        "Env-conditional, pre-existing, not provably enumerable; accepted per "
-        "maintainer decision. Durable fix = pure-literal policy (STATE FOLLOW-UP "
-        "1). strict=True forces marker removal once the class is closed."
-    ),
-    strict=True,
-)
+#: reopened this phase three times). CLOSED in Phase 4 (TOK-02, 04-02): the
+#: safe-expansion allowlist in ``tokenize()`` permits ``$name``/``${name}`` and
+#: the default-value family ``${name:-word}`` (``word`` recursively re-scanned)
+#: BY FORM, and abstains WHOLESALE on every other ``${...}`` family by its
+#: discriminator char — ``@`` (transform, ``@P``), ``:`` not followed by ``-=+?``
+#: (offset/substring, ``${s:i}``), ``[`` (subscript, ``${arr[i]}``) — with NO
+#: operator enumeration. The three former-xfail members below now resolve
+#: ``!= "allow"`` through the live ``tokenize -> fold`` path, so the markers were
+#: removed (strict-xfail would otherwise xpass -> fail). The durable closure is
+#: allow-by-form + wholesale-family-abstain, not the pure-literal policy.
 _QUOTING_EVASIONS = [
     "cat '\\' <(id)",  # CR-01: escaped-quote over-extension hides <(
     "cat '\\' <<<pwned",  # CR-01: escaped-quote over-extension hides <<<
     'cat "$(id)"',  # CR-02: double-quoted command substitution
     'cat "`id`"',  # CR-02: double-quoted backtick command substitution
-    'cat "${ id; }"',  # CR-funsub: bash 5.3 funsub (RED->GREEN in 03-04)
-    'cat "${| id; }"',  # CR-funsub: bash 5.3 pipe-funsub (RED->GREEN in 03-04)
-    'cat "${x:-$(id)}"',  # nested cmdsub in default word (already CR-02; pinned)
-    'cat "${x:-`id`}"',  # nested backtick cmdsub in default word (already CR-02)
-    # CR-bodyeval class (accepted+tracked residual — see comment above):
-    pytest.param('cat "${x@P}"', marks=_BODYEVAL_XFAIL),  # @P prompt transform
-    pytest.param('cat "${s:i}"', marks=_BODYEVAL_XFAIL),  # arithmetic substring
-    pytest.param('cat "${arr[i]}"', marks=_BODYEVAL_XFAIL),  # arithmetic subscript
+    'cat "${ id; }"',  # CR-funsub: bash 5.3 funsub
+    'cat "${| id; }"',  # CR-funsub: bash 5.3 pipe-funsub
+    'cat "${x:-$(id)}"',  # nested cmdsub in default word (recursive re-scan)
+    'cat "${x:-`id`}"',  # nested backtick cmdsub in default word (recursive)
+    # CR-bodyeval class — CLOSED by the TOK-02 allowlist (see comment above):
+    'cat "${x@P}"',  # @P prompt transform — @-family abstains wholesale
+    'cat "${s:i}"',  # arithmetic substring — :-not-default-family abstains
+    'cat "${arr[i]}"',  # arithmetic subscript — [-family abstains wholesale
 ]
 
 
@@ -223,13 +212,13 @@ def test_allowlist_over_abstain(command: str, ctx: Context) -> None:
     assert _decision(command, ctx) != "allow"
 
 
-#: WR-01 (03-REVIEW.md) disposition: accept-with-rationale + tracking test. An
-#: UNTERMINATED quote is a bash syntax error that never executes — the shell
-#: rejects the line before running anything — so reaching ``allow`` here is NOT a
-#: cardinal false-allow today. The cheap fix (an unbalanced-quote abstain check)
-#: is OUT OF SCOPE for 03-04. This test PINS the documented current behavior so a
-#: FUTURE grammar widening that makes the construct executable trips a tracked
-#: test rather than silently becoming a cardinal hole.
+#: WR-01 (03-REVIEW.md) disposition — UPDATED in 04-02 (Assumption A3). The
+#: tokenizer ends the scan with an open quote-state flag on an UNTERMINATED quote;
+#: it cannot close the quote state, so it cannot prove the command read-only and
+#: ABSTAINS (the safer behavior — the old decompose path approved these as
+#: harmless syntax errors). This is strictly conservative: an unterminated quote
+#: is a bash syntax error that never executes, so abstaining loses no legitimate
+#: coverage. The pin now asserts ``!= "allow"`` and records the safer behavior.
 _UNCLOSED_QUOTE_TODAY = [
     "cat 'unclosed",
     'cat "unclosed',
@@ -239,13 +228,14 @@ _UNCLOSED_QUOTE_TODAY = [
 
 @pytest.mark.parametrize("command", _UNCLOSED_QUOTE_TODAY)
 def test_unclosed_quote_status_quo(command: str, ctx: Context) -> None:
-    """WR-01: pin the current ``allow`` of an unterminated quote (syntax error).
+    """WR-01: an unterminated quote now ABSTAINS (tokenizer, 04-02 / A3).
 
-    Accepted-with-rationale: an unterminated quote is a bash syntax error that
-    never executes, so this is not a cardinal false-allow. Tracked so a future
-    grammar change that makes it executable fails this pin loudly.
+    The tokenizer finishes the scan with an open quote-state flag and cannot
+    prove the command read-only, so it abstains (safer than the old decompose
+    path's ``allow``). An unterminated quote is a bash syntax error that never
+    executes, so this loses no legitimate coverage.
     """
-    assert _decision(command, ctx) == "allow"
+    assert _decision(command, ctx) != "allow"
 
 
 #: WR-02 (03-REVIEW.md) disposition: cheap regression test. The ``_DISCARD_REDIR``
@@ -272,3 +262,30 @@ def test_discard_redir_is_complete_token(command: str, ctx: Context) -> None:
     false-allow; this test fails loudly if that happens.
     """
     assert _decision(command, ctx) != "allow"
+
+
+def test_arith_not_allow_live_path(ctx: Context) -> None:
+    """CARDINAL (the blocker fix, re-homed from deleted test_decompose.py).
+
+    ``$((...))`` arithmetic is NOT a provably-read-only expansion form, so the
+    safe-expansion allowlist abstains on the ``$((`` opener. On the live
+    ``tokenize -> fold`` path this resolves ``!= "allow"`` — never silently
+    approved. This is a STANDALONE pin, NOT a ``_CORPUS`` entry (DATA pristine,
+    D-20). It exists BEFORE Plan 03 removes ``_QARG`` so there is never a
+    live-path window where arithmetic could allow (D-15 abstain-never-allow).
+    """
+    assert _decision("echo $((1 << 2))", ctx) != "allow"
+
+
+def test_arith_segments_intact_and_abstain() -> None:
+    """The two arith dimensions hold JOINTLY (complete-then-flag).
+
+    The allowlist sets ``abstain_reason`` on the ``$((`` opener WITHOUT
+    fragmenting the segment: the scan completes (Plan-01 no-fragmentation pin
+    ``segments == ["echo $((1 << 2))"]`` survives) AND ``abstain_reason is not
+    None`` (Plan-02 not-provably-read-only). These are jointly satisfiable only
+    because the abstain is complete-then-flag, not set-and-return.
+    """
+    result = tokenize("echo $((1 << 2))")
+    assert result.segments == ["echo $((1 << 2))"]
+    assert result.abstain_reason is not None
