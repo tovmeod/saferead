@@ -79,9 +79,16 @@ def test_escaped_separator_does_not_split() -> None:
 
 
 def test_quoted_operator_in_backtick_does_not_split() -> None:
+    """UPDATED 04-02: inner ``;`` does not split; backtick cmdsub now ABSTAINS.
+
+    The backtick-quoted ``;`` must NOT split the segment (TOK-01 structure
+    preserved). UPDATED in 04-02 (TOK-02): backtick command substitution is
+    command execution, not a provably-read-only form, so the allowlist abstains
+    (complete-then-flag — segment stays one unit).
+    """
     result = tokenize("echo `a; b`")
-    assert result.abstain_reason is None
-    assert result.segments == ["echo `a; b`"]
+    assert result.abstain_reason is not None  # backtick cmdsub abstains (TOK-02)
+    assert result.segments == ["echo `a; b`"]  # no fragmentation (TOK-01)
 
 
 # --- structural abstain triggers ---------------------------------------------
@@ -159,21 +166,28 @@ def test_quoted_literal_stays_safe(command: str) -> None:
 
 
 def test_arith_shift_no_fragmentation() -> None:
-    """``echo $((1 << 2))`` is one opaque unit, no fragmentation, no abstain.
+    """``echo $((1 << 2))`` is one opaque unit, no fragmentation; now ABSTAINS.
 
     The inner ``<<`` must NOT be misread as a heredoc; the segment must not
-    split. The ``!= allow`` dimension is set by the Plan-02 allowlist on the
-    live path (named deferral) — NOT asserted here by design.
+    split (Plan-01 no-fragmentation). UPDATED in 04-02 (TOK-02): the
+    safe-expansion allowlist now sets ``abstain_reason`` on the ``$((`` opener
+    (arithmetic is not a provably-read-only form) WITHOUT fragmenting the
+    segment — both dimensions hold jointly (complete-then-flag).
     """
     result = tokenize("echo $((1 << 2))")
-    assert result.abstain_reason is None
-    assert result.segments == ["echo $((1 << 2))"]
+    assert result.abstain_reason is not None  # arith abstains (TOK-02)
+    assert result.segments == ["echo $((1 << 2))"]  # no fragmentation (TOK-01)
 
 
 def test_arith_unit_emits_no_garbage_tokens() -> None:
-    """The ``$((...))`` arithmetic is held as ONE word token, no fragments."""
+    """The ``$((...))`` arithmetic is held as ONE word token, no fragments.
+
+    UPDATED in 04-02: arith now abstains (TOK-02), but the no-garbage-tokens /
+    no-fragmentation structure (TOK-01) is unchanged — the unit is still one
+    opaque word token.
+    """
     result = tokenize("echo $((1 << 2))")
-    assert result.abstain_reason is None
+    assert result.abstain_reason is not None  # arith abstains (TOK-02)
     assert len(result.tokens) == 1
     seg = result.tokens[0]
     # Exactly two word tokens: `echo` and the opaque `$((1 << 2))` unit.
@@ -184,9 +198,10 @@ def test_arith_unit_emits_no_garbage_tokens() -> None:
 
 
 def test_arith_does_not_split_on_inner_operators() -> None:
+    """UPDATED 04-02: inner ``||`` does not split; arith abstains (TOK-02)."""
     result = tokenize("echo $((1 || 2))")
-    assert result.abstain_reason is None
-    assert result.segments == ["echo $((1 || 2))"]
+    assert result.abstain_reason is not None  # arith abstains (TOK-02)
+    assert result.segments == ["echo $((1 || 2))"]  # no fragmentation (TOK-01)
 
 
 # --- purity / re-entrancy (D-19) ---------------------------------------------
