@@ -271,8 +271,9 @@ def test_arith_not_allow_live_path(ctx: Context) -> None:
     safe-expansion allowlist abstains on the ``$((`` opener. On the live
     ``tokenize -> fold`` path this resolves ``!= "allow"`` — never silently
     approved. This is a STANDALONE pin, NOT a ``_CORPUS`` entry (DATA pristine,
-    D-20). It exists BEFORE Plan 03 removes ``_QARG`` so there is never a
-    live-path window where arithmetic could allow (D-15 abstain-never-allow).
+    D-20). It is the GREEN-WINDOW pin: it stayed green when Plan 03 removed the
+    reader's per-dollar regex, proving the tokenizer allowlist (not that regex)
+    holds the arithmetic abstain (D-15 abstain-never-allow).
     """
     assert _decision("echo $((1 << 2))", ctx) != "allow"
 
