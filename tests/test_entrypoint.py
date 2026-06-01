@@ -103,12 +103,12 @@ def test_entrypoint_injects_real_branch_resolver(monkeypatch) -> None:
     """
     module = _load_entrypoint_module()
     captured: dict[str, object] = {}
+    real_context = module.Context  # capture BEFORE patching (avoid self-recursion)
 
     def _capture_context(*, cwd, _resolver):
         captured["resolver"] = _resolver
-        # Return a dummy whose tokenize/fold path the entrypoint won't exercise
-        # meaningfully — but it still calls fold(), so hand back a real Context.
-        return module.Context(cwd=cwd, _resolver=_resolver)
+        # Hand back a REAL Context so the entrypoint's fold() path runs normally.
+        return real_context(cwd=cwd, _resolver=_resolver)
 
     monkeypatch.setattr(module, "Context", _capture_context)
 
