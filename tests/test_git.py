@@ -170,6 +170,47 @@ def test_git_dangerous_flag_abstains(segment: str, ctx: Context) -> None:
     assert recognize_git(segment, ctx) is None
 
 
+# --- redirect / control fence (cardinal) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git log >/tmp/x",  # redirect git output to a real file
+        "git diff > out.txt",  # redirect to a user file
+        "git show >/etc/x",  # redirect to a system file
+        "git status >/tmp/../etc/passwd",  # path-escaping redirect
+        "git status &",  # background control operator
+        "git branch -l >/tmp/x",  # fence applies to per-subcommand groups too
+        "git config --get user.name >/tmp/x",
+    ],
+)
+def test_git_redirect_abstains(segment: str, ctx: Context) -> None:
+    """A redirect to a real file or a background op must NOT be approved.
+
+    The tokenizer keeps ``>``/``&`` glued into a word token, so a ``-``-leading
+    flag check alone would pass ``git log >/tmp/x`` as a positional. The
+    redirect/control fence (mirroring reader._tail_is_safe) closes it.
+    """
+    assert recognize_git(segment, ctx) is None
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git log >/dev/null",  # discard redirect never touches a user file
+        "git status 2>&1",
+        "git diff 2>/dev/null",
+    ],
+)
+def test_git_discard_redirect_readonly_allows(segment: str, ctx: Context) -> None:
+    """A discard redirect (>/dev/null, 2>&1) on a read-only form stays allow."""
+    verdict = recognize_git(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "git"
+
+
 # --- transitional gated pins (gated path lands in 05-02) -------------------
 
 

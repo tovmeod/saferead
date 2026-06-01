@@ -36,9 +36,18 @@ branch (Pitfall 1).
 
 from __future__ import annotations
 
+import re
+
 from ..context import Context
 from ..tokenizer import tokenize
 from ..verdict import Verdict
+
+# Discard redirects that never write a user file (mirrors reader.py). A token
+# matching this EXACTLY (``fullmatch``) is permitted; any other token bearing a
+# ``>`` (redirect to a real file) or ``&`` (background/control) -> abstain. The
+# tokenizer leaves both glued into a word token, so the recognizer inspects the
+# token TEXT — a ``-``-leading flag check alone does NOT catch ``git log >/tmp/x``.
+_DISCARD_REDIR = re.compile(r"(?:2>&1|>/dev/null|2>/dev/null|&>>?/dev/null)")
 
 # Hardcoded policy constants (D-04). Phase 9 replaces these with TOML; do NOT
 # pull config forward. Both are defined here even though only Plan 05-02 consumes
@@ -133,6 +142,18 @@ def recognize_git(segment: str, ctx: Context) -> Verdict | None:
         return None  # bare ``git`` (or ``git -C`` with no following token)
     sub = tokens[i]
     args = tokens[i + 1 :]
+
+    # Redirect / control fence (applies to EVERY subcommand, before SHAPE
+    # classification). A redirect to a real file or a background operator is a
+    # write/exec the `-`-leading flag check cannot see: `git log >/tmp/x`
+    # tokenizes to `[..,"log",">/tmp/x"]` and `>/tmp/x` is not a flag, so the
+    # SHAPE allowlist would otherwise pass it as a positional. A discard redirect
+    # (`>/dev/null`, `2>&1`) is permitted (never touches a user file).
+    for tok in args:
+        if _DISCARD_REDIR.fullmatch(tok):
+            continue
+        if ">" in tok or "&" in tok:
+            return None
 
     # Read-only SHAPE takes precedence: ``stash list``/``stash show`` are
     # read-only even though bare ``stash`` is GATED (checked next).
