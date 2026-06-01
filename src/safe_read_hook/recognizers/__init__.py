@@ -12,10 +12,13 @@ from collections.abc import Callable
 
 from ..context import Context
 from ..verdict import Verdict
+from .git import recognize_git
 from .reader import recognize_reader
 
 #: The uniform recognizer contract (D-01).
 Recognizer = Callable[[str, Context], "Verdict | None"]
 
-#: Ordered registry; order is significant (D-02).
-REGISTRY: list[Recognizer] = [recognize_reader]
+#: Ordered registry; order is significant (D-02). Reader stays FIRST (the common
+#: read path); the git recognizer follows (CORE-04 — one list edit per new
+#: recognizer, no engine change).
+REGISTRY: list[Recognizer] = [recognize_reader, recognize_git]

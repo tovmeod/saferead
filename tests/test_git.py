@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from safe_read_hook.context import Context
+from safe_read_hook.recognizers import REGISTRY, recognize_reader
 from safe_read_hook.recognizers.git import recognize_git
 from safe_read_hook.verdict import Verdict
 
@@ -202,3 +203,28 @@ def test_git_gated_forms_abstain(segment: str, ctx: Context) -> None:
 )
 def test_git_non_git_abstains(segment: str, ctx: Context) -> None:
     assert recognize_git(segment, ctx) is None
+
+
+# --- REGISTRY wiring (Task 2) ---------------------------------------------
+
+
+def test_git_registered_after_reader() -> None:
+    """recognize_git is in the ordered REGISTRY, after recognize_reader.
+
+    Reader stays FIRST (the common read path); the git recognizer follows
+    (CORE-04 ordering invariant — one list edit, no engine change).
+    """
+    assert recognize_git in REGISTRY
+    assert REGISTRY.index(recognize_reader) < REGISTRY.index(recognize_git)
+
+
+def test_git_config_injection_corpus_consistency(ctx: Context) -> None:
+    """Pitfall 5: the corpus ``!= allow`` green is explained by an explicit abstain.
+
+    The corpus ``git -c core.fsmonitor=touch status`` vector passes its
+    ``!= allow`` guard whether the recognizer abstains OR asks — so the corpus
+    green alone does not prove the recognizer abstains. Re-pin the direct
+    ``is None`` here so the corpus green is attributable to recognize_git's
+    explicit ``-c`` abstain, not coincidence.
+    """
+    assert recognize_git("git -c core.fsmonitor=touch status", ctx) is None
