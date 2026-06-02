@@ -229,8 +229,13 @@ def test_git_remote_show_network_abstains(segment: str, ctx: Context) -> None:
         "git remote -v",
     ],
 )
-def test_git_remote_local_forms_allow(segment: str, ctx: Context) -> None:
-    """Local remote reads (``-n`` show, ``get-url``, ``-v``) stay allow (WR-03)."""
+def test_git_remote_local_forms_readonly_allow(segment: str, ctx: Context) -> None:
+    """Local remote reads (``-n`` show, ``get-url``, ``-v``) stay allow (WR-03).
+
+    Named with ``readonly`` so the documented Task-1 ``-k`` filter selects it —
+    a positive allow-test that matches no filter substring would be silently
+    deselected (the WR-01 failure class this same review iteration closed).
+    """
     verdict = recognize_git(segment, ctx)
     assert verdict is not None
     assert verdict.decision == "allow"
