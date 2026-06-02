@@ -93,6 +93,35 @@ def test_git_dash_C_no_path_abstains(ctx: Context) -> None:
     assert recognize_git("git -C", ctx) is None
 
 
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git -C x&id log",  # &id execs arbitrary command (backgrounds git -C x)
+        "git -C >/tmp/pwned status",  # > truncates an arbitrary file
+        "git -C a&id -C /safe log",  # non-final -C value also fenced
+    ],
+)
+def test_git_dash_C_redirect_value_abstains(segment: str, ctx: Context) -> None:
+    """A ``>``/``&`` glued into the ``-C`` value must NOT be approved (CR-01).
+
+    The ``-C`` value token is consumed before the post-subcommand fence, so the
+    fence is applied at capture time instead. ``git -C x&id`` execs ``id`` and
+    ``git -C >/tmp/x`` truncates a file in real bash — both are false-allows of
+    command execution / file write absent this fence (cardinal zero-false-allow).
+    """
+    assert recognize_git(segment, ctx) is None
+
+
+def test_git_gated_dash_C_redirect_value_abstains() -> None:
+    """The gated path is also fenced: ``git -C x&id commit`` abstains BEFORE probe.
+
+    The fence sits in the leading-option scan (above the gated branch probe), so
+    a redirect/control ``-C`` value aborts before ctx.branch is ever touched.
+    """
+    ctx = Context(cwd="/x", _resolver=_fail_if_called)
+    assert recognize_git("git -C x&id commit -m x", ctx) is None
+
+
 # --- config injection / leading-option abstain ----------------------------
 
 

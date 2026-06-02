@@ -133,7 +133,17 @@ def recognize_git(segment: str, ctx: Context) -> Verdict | None:
     i = 1
     while i < len(tokens) and tokens[i].startswith("-"):
         if tokens[i] == "-C" and i + 1 < len(tokens):
-            effective_cwd = tokens[i + 1]  # last -C wins
+            cval = tokens[i + 1]
+            # The ``-C`` value token is consumed here (below the final ``i``), so
+            # the post-subcommand redirect/control fence (which only scans
+            # ``tokens[i + 1:]``) never sees it. A ``>``/``&`` glued into that
+            # value (``git -C x&id log`` execs ``id``; ``git -C >/tmp/x status``
+            # truncates a file — the tokenizer keeps both as one word) would
+            # otherwise reach an ALLOW. Apply the SAME fence here as the value is
+            # captured (cardinal zero-false-allow).
+            if not _DISCARD_REDIR.fullmatch(cval) and (">" in cval or "&" in cval):
+                return None
+            effective_cwd = cval  # last -C wins
             i += 2  # consume ``-C`` and its path token
             continue
         return None  # ``-c`` and every other leading option fail closed
