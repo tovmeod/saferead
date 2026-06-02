@@ -200,6 +200,43 @@ def test_git_dangerous_flag_abstains(segment: str, ctx: Context) -> None:
     assert recognize_git(segment, ctx) is None
 
 
+# --- remote network egress (D-09 polarity) --------------------------------
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git remote show origin",  # queries the remote over the network (egress)
+        "git remote show",  # bare show still queries every remote
+    ],
+)
+def test_git_remote_show_network_abstains(segment: str, ctx: Context) -> None:
+    """``git remote show <name>`` queries the remote (egress) -> abstain (WR-03).
+
+    Without ``-n``/``--no-query`` git runs the equivalent of ``git ls-remote``,
+    the same network egress the line-250 ``ls-remote`` abstain already blocks
+    (D-09). Allowing it inverted the policy polarity.
+    """
+    assert recognize_git(segment, ctx) is None
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git remote show -n origin",  # -n => local, no network query
+        "git remote show --no-query origin",
+        "git remote get-url origin",  # local lookup, no egress
+        "git remote -v",
+    ],
+)
+def test_git_remote_local_forms_allow(segment: str, ctx: Context) -> None:
+    """Local remote reads (``-n`` show, ``get-url``, ``-v``) stay allow (WR-03)."""
+    verdict = recognize_git(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "git"
+
+
 # --- redirect / control fence (cardinal) ----------------------------------
 
 

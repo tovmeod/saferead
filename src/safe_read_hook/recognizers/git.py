@@ -211,15 +211,28 @@ def _is_read_only(sub: str, args: list[str]) -> bool:
         return _all_flags_in(args, _TAG_READ_FLAGS) and not _has_positional(args)
 
     if sub == "remote":
-        # bare ``remote``; ``remote -v``; ``remote show [name]``;
-        # ``remote get-url <name>`` — all reads. add/remove/set-url -> abstain.
+        # bare ``remote``; ``remote -v``; ``remote get-url <name>``;
+        # ``remote show -n <name>`` — all LOCAL reads. add/remove/set-url and the
+        # network-querying ``remote show`` (without -n) -> abstain.
         if not args:
             return True
         if args == ["-v"] or args == ["--verbose"]:
             return True
-        if args and args[0] in ("show", "get-url"):
+        if args[0] == "get-url":
             # the rest are positional remote names (reads); no option flags.
             return not any(_is_option(tok) for tok in args[1:])
+        if args[0] == "show":
+            # ``remote show <name>`` queries the remote over the network by
+            # default (the equivalent of ``git ls-remote``) — egress, same class
+            # as the line-below ``ls-remote`` abstain (D-09). Only the LOCAL
+            # ``-n``/``--no-query`` form is read-only; require it and allow no
+            # other option flag.
+            rest = args[1:]
+            if not any(f in ("-n", "--no-query") for f in rest):
+                return False
+            return all(
+                tok in ("-n", "--no-query") or not _is_option(tok) for tok in rest
+            )
         return False
 
     if sub == "config":
