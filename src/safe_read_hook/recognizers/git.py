@@ -27,11 +27,12 @@ on its option flags (mirroring reader.py's ``file`` discipline): an unrecognized
 admitted in bare/positional form only; the per-subcommand groups
 (``branch``/``tag``/``config``/...) admit only their listed read-only flags.
 
-GATED subcommands (``add``/``commit``/``stash`` bare/push) are NOT approved here
-(they fall through to ``None``); the protected-branch ASK verdict lands in Plan
-05-02, which EXTENDS the leading-option scan to capture last-``-C``-wins
-``effective_cwd`` for the branch probe. The read-only path NEVER resolves the
-branch (Pitfall 1).
+GATED subcommands are exactly ``_GATED`` = ``add``/``commit``/bare ``stash``
+(NOT ``push``): they are state-mutating, so they are NOT auto-allowed here — the
+protected-branch ASK verdict lands in Plan 05-02, which EXTENDS the leading-option
+scan to capture last-``-C``-wins ``effective_cwd`` for the branch probe. ``push``
+and ``stash push`` are NOT gated; they currently fall through to ``None``
+(abstain). The read-only path NEVER resolves the branch (Pitfall 1).
 """
 
 from __future__ import annotations
@@ -171,7 +172,8 @@ def recognize_git(segment: str, ctx: Context) -> Verdict | None:
     if _is_read_only(sub, args):
         return Verdict("allow", "read-only git", "git")
 
-    # GATED branch-gate verdict (D-01/D-02). add/commit/stash(bare|push) are
+    # GATED branch-gate verdict (D-01/D-02). _GATED = add/commit/bare stash (NOT
+    # push, NOT stash push — those abstain above/fall through to None) are
     # state-mutating; gate them on the working branch. This is the ONLY place
     # recognize_git resolves the branch (Pitfall 1 — never on the read-only
     # path above). The probe is lazy + per-cwd memoized inside ctx.branch.
