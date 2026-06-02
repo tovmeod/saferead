@@ -54,6 +54,10 @@ def ctx() -> Context:
         "sort -S 2M f",  # separate-token buffer size (D-05 admit)
         "sort -S2M f",  # glued value-bearing head (-S)
         "sort --reverse f",  # long form
+        # single-operand / stdin reads preserved under the W3 fence (D-10)
+        "uniq f",
+        "uniq -",  # stdin
+        "xxd f",
     ],
 )
 def test_reader_allows_read_only(segment: str, ctx: Context) -> None:
@@ -94,6 +98,15 @@ def test_reader_cat_is_allow_prover(ctx: Context) -> None:
         "sort -ro f",  # W4 bundle smuggle (LV-3) — the cardinal close
         "sort -T /x f",  # D-05 omit — temp-dir redirect
         "sort --compress-program=gzip f",  # W6 exec
+        # W3 positional output-operand writes (LV-1/LV-2 — D-10)
+        "uniq a b",  # uniq IN OUT writes OUT
+        "xxd a b",  # xxd in out writes outfile
+        # awk: Turing-complete, every invocation abstains (D-01/D-03)
+        "awk '{print $1}'",
+        'awk \'BEGIN{print > "/etc/x"}\'',
+        # tee writes files — unclaimed -> abstain (D-09)
+        "tee f",
+        "tee out.txt",
     ],
 )
 def test_reader_abstains(segment: str, ctx: Context) -> None:
@@ -203,3 +216,83 @@ def test_reader_dispatches_python_to_analyzer(
 def test_reader_python_shape_abstains_with_skeleton(ctx: Context) -> None:
     """With the real skeleton (returns None), a python -c shape -> abstain."""
     assert recognize_reader('python -c "import os"', ctx) is None
+
+
+# --- W3 positional output-operand fence (D-10) ----------------------------
+
+
+def test_reader_abstains_on_uniq_positional_write(ctx: Context) -> None:
+    """LV-1: `uniq IN OUT` writes its second positional operand -> abstain.
+
+    The live false-allow this fence closes: `_tail_is_safe` accepted any
+    non-flag token as a bare path, so `uniq a b` reached `Verdict('allow')`
+    today and wrote `b`. Single-operand / stdin reads stay allow.
+    """
+    assert recognize_reader("uniq a b", ctx) is None
+    assert recognize_reader("uniq /tmp/in /tmp/out", ctx) is None
+    allowed = recognize_reader("uniq f", ctx)
+    assert allowed is not None and allowed.decision == "allow"
+    stdin = recognize_reader("uniq -", ctx)
+    assert stdin is not None and stdin.decision == "allow"
+
+
+def test_reader_abstains_on_xxd_positional_write(ctx: Context) -> None:
+    """LV-2: `xxd in out` writes its second positional operand -> abstain."""
+    assert recognize_reader("xxd a b", ctx) is None
+    allowed = recognize_reader("xxd f", ctx)
+    assert allowed is not None and allowed.decision == "allow"
+
+
+# --- awk: unclaimed, Turing-complete -> abstain (D-01/D-03) ----------------
+
+
+def test_reader_abstains_on_awk(ctx: Context) -> None:
+    """D-01/D-03: every awk invocation abstains (no awk allow this phase).
+
+    awk is Turing-complete (`print > file`, `print | "cmd"`, `system()`,
+    `getline`); no surface form proves it read-only. Even a benign-looking
+    `awk '{print $1}'` abstains, and the corpus output-redirect vector stays
+    not-allow.
+    """
+    assert recognize_reader("awk '{print $1}'", ctx) is None
+    assert recognize_reader('awk \'BEGIN{print > "/etc/x"}\'', ctx) is None
+
+
+# --- tee: unclaimed -> abstain, asserted via a DIRECT call (D-09) ----------
+
+
+def test_reader_abstains_on_tee(ctx: Context) -> None:
+    """D-09: `tee FILE` writes files; tee is unclaimed -> abstain.
+
+    Asserted by calling `recognize_reader('tee f')` DIRECTLY — NOT the compound
+    `grep … | tee …`, which abstains via the multi-segment `len(tokens) != 1`
+    guard and never observes tee's OWN abstain (RESEARCH §484).
+    """
+    assert recognize_reader("tee f", ctx) is None
+    assert recognize_reader("tee out.txt", ctx) is None
+
+
+# --- W3 over-fence guard: inputs-only multi-operand reads stay allow -------
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "cat a b",
+        "diff a b",
+        "comm a b",
+        "paste a b",
+        "grep x f1 f2",
+    ],
+)
+def test_reader_multi_input_stays_allow(segment: str, ctx: Context) -> None:
+    """Pitfall 3: the W3 fence is scoped to {uniq,xxd} — inputs-only reads allow.
+
+    `cat`/`diff`/`comm`/`paste`/`grep` take multiple INPUT operands; the fence
+    must NOT be a blanket operand-count rule or it breaks these legitimate
+    multi-input reads.
+    """
+    verdict = recognize_reader(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "reader"
