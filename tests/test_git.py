@@ -400,8 +400,13 @@ def test_git_gated_path_only_readonly_no_probe() -> None:
 # counting fake resolver — NO real subprocess.
 
 
-def test_git_memoizes_one_probe_per_cwd() -> None:
-    """``git add`` then ``git commit`` on the SAME ctx probes exactly once (D-08)."""
+def test_git_gated_memoizes_one_probe_per_cwd() -> None:
+    """``git add`` then ``git commit`` on the SAME ctx probes exactly once (D-08).
+
+    Named with ``gated`` so the documented ``-k "gated or unresolved"`` selection
+    filter collects it (WR-01) — under the bare ``memoizes`` name it was silently
+    deselected, so this memoization safety pin never ran under the CI filter.
+    """
     calls: list[str | None] = []
     ctx = Context(cwd="/x", _resolver=lambda c: calls.append(c) or "main")
     recognize_git("git add .", ctx)
@@ -409,11 +414,15 @@ def test_git_memoizes_one_probe_per_cwd() -> None:
     assert len(calls) == 1
 
 
-def test_git_short_circuit_zero_probe() -> None:
+def test_git_gated_short_circuit_zero_probe() -> None:
     """Unrecognized-first (``rm -rf x && git commit``) -> veto, ZERO probes (D-08).
 
     The engine short-circuits on the first unrecognized segment, so the git
     recognizer never runs and the resolver is never called.
+
+    Named with ``gated`` so the documented ``-k "gated or unresolved"`` selection
+    filter collects it (WR-01) — under the bare ``short_circuit`` name it was
+    silently deselected, so this zero-probe safety pin never ran under the filter.
     """
     calls: list[str | None] = []
     ctx = Context(cwd="/x", _resolver=lambda c: calls.append(c) or "feature/foo")
