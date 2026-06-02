@@ -303,6 +303,16 @@ _VALUE_BEARING_FLAGS: dict[str, frozenset[str]] = {
 _NUMERIC_FLAG_CMDS = frozenset({"head", "tail"})
 _NUMERIC_FLAG = re.compile(r"-\d+")
 
+#: Commands whose SECOND positional operand is an OUTPUT file (a write with no
+#: flag): ``uniq [INPUT [OUTPUT]]``, ``xxd [infile [outfile]]``. The flag
+#: allowlist cannot see this — the write is un-flagged. The W3 fence (D-10):
+#: abstain when such a command has >= 2 bare (non-flag, non-discard-redirect)
+#: operand tokens. Scoped to ``{uniq, xxd}`` ONLY — it MUST NOT be a blanket
+#: operand-count rule, or it would break the inputs-only multi-operand reads
+#: ``cat a b`` / ``diff a b`` / ``comm a b`` / ``paste a b`` / ``grep x f1 f2``
+#: (Pitfall 3 — their operands are all INPUTS).
+_OUTPUT_OPERAND_CMDS = frozenset({"uniq", "xxd"})
+
 
 def _flag_is_read_only(cmd: str, tok: str) -> bool:
     """True iff option-flag ``tok`` is on ``cmd``'s read-only flag allowlist.
@@ -347,9 +357,18 @@ def _tail_is_safe(cmd: str, arg_tokens: list[str]) -> bool:
     read-only flag allowlist (``_flag_is_read_only``). A bare value/path token
     is permitted. Commands with no allowlist entry permit bare form only.
 
+    W3 positional-operand fence (D-10): for a command in
+    ``_OUTPUT_OPERAND_CMDS`` (``uniq``/``xxd``), whose SECOND positional is an
+    OUTPUT file, abstain when there are >= 2 bare operand tokens (a non-flag,
+    non-discard-redirect token; ``-`` stdin counts as an operand). This closes
+    the un-flagged positional write LV-1/LV-2. Scoped to those commands only —
+    inputs-only multi-operand reads stay allow.
+
     Over-abstains only on a *quoted* ``">"``/``"&"`` argument or an unlisted
     flag — a safe coverage loss (prompt the command), never a false-allow.
     """
+    operand_count = 0
+    fence_operands = cmd in _OUTPUT_OPERAND_CMDS
     for tok in arg_tokens:
         if _DISCARD_REDIR.fullmatch(tok):
             continue
@@ -359,6 +378,12 @@ def _tail_is_safe(cmd: str, arg_tokens: list[str]) -> bool:
             if not _flag_is_read_only(cmd, tok):
                 return False
             continue
+        # A bare operand (path, value, or ``-`` stdin). For output-operand
+        # commands, a second bare operand is an un-flagged output write (W3).
+        if fence_operands:
+            operand_count += 1
+            if operand_count >= 2:
+                return False
     return True
 
 
