@@ -109,6 +109,7 @@ _CMD_FILTERS = frozenset(
         "fold",
         "expand",
         "unexpand",
+        "sort",
     }
 )
 
@@ -230,13 +231,72 @@ _READ_ONLY_FLAGS: dict[str, frozenset[str]] = {
     "cut": frozenset({"-d", "-f", "-c"}),  # value-bearing; matched by 2-char head
     "du": frozenset({"-s", "-h", "-sh", "-a", "-c"}),
     "df": frozenset({"-h", "-k", "-T"}),
+    # sort (D-04/D-05): ADMIT only flags proven read-only in GNU *and* BSD/uutils.
+    # OMIT every write/exec form by allowlist-by-omission: ``-o``/``--output``
+    # (W2 output file), ``-T``/``--temporary-directory`` (D-05 — directs temp
+    # writes), ``--compress-program`` (W6 exec), ``--random-source``,
+    # ``--files0-from``, ``-m``/``--merge``. ``-k``/``-t``/``-S`` are
+    # value-bearing (see ``_VALUE_BEARING_FLAGS``) — they appear here so the
+    # separate-token form (``sort -S 2M``) exact-matches, AND there so the glued
+    # form (``-S2M``) head-matches. They do NOT go in ``_VALUE_PREFIX_CMDS``
+    # (that re-opens the LV-3 ``-ro`` smuggle — D-11).
+    "sort": frozenset(
+        {
+            "-n",
+            "-r",
+            "-u",
+            "-f",
+            "-b",
+            "-h",
+            "-g",
+            "-M",
+            "-V",
+            "-s",
+            "-z",
+            "-c",
+            "-C",
+            "-k",
+            "-t",
+            "-S",
+            "--numeric-sort",
+            "--reverse",
+            "--unique",
+            "--ignore-case",
+            "--ignore-leading-blanks",
+            "--human-numeric-sort",
+            "--general-numeric-sort",
+            "--month-sort",
+            "--version-sort",
+            "--stable",
+            "--zero-terminated",
+            "--check",
+            "--check-silent",
+            "--key",
+            "--field-separator",
+            "--buffer-size",
+        }
+    ),
 }
 
 #: Commands whose short flags carry a glued value (e.g. ``cut -d:`` / ``-f1``).
 #: For these, a flag token is matched by its 2-char head (``tok[:2]``) so the
 #: value tail is accepted. Restricted to ``cut`` (no write/exec flag shares the
 #: ``-d``/``-f``/``-c`` prefix for ``cut``); do NOT extend without re-auditing.
+#: ``sort`` is DELIBERATELY absent — the coarse ``tok[:2] in allowed`` path would
+#: re-open the LV-3 ``-ro`` smuggle (``-r`` is on the allowlist, so ``-ro``
+#: head-matches and writes ``OUT``). ``sort`` uses ``_VALUE_BEARING_FLAGS``
+#: instead (D-11).
 _VALUE_PREFIX_CMDS = frozenset({"cut"})
+
+#: Per-command set of genuinely VALUE-BEARING short-flag heads — flags that
+#: consume their ENTIRE remaining tail as a value, so nothing can hide after them
+#: (``-k2``, ``-t:``, ``-S2M``). Only these heads may glued-prefix-match; any
+#: other 2-char head on the allowlist (``-r``/``-n``/``-u``…) must NOT match a
+#: longer glued token — a longer token starting there is a bundle and abstains
+#: (closes W4/LV-3 — D-11). Separate from the coarse ``_VALUE_PREFIX_CMDS``.
+_VALUE_BEARING_FLAGS: dict[str, frozenset[str]] = {
+    "sort": frozenset({"-k", "-t", "-S"}),
+}
 
 #: head/tail accept the historic ``-NUM`` line-count form (``head -5 f``), which
 #: is genuinely read-only.
@@ -259,8 +319,17 @@ def _flag_is_read_only(cmd: str, tok: str) -> bool:
     if tok in allowed:
         return True
     # Value-bearing short flag: accept the 2-char head (e.g. ``-d:`` -> ``-d``)
-    # only when the command opted into prefix matching.
+    # only when the command opted into coarse prefix matching (``cut``). Every
+    # head on the allowlist may match — safe for ``cut`` because ``-d``/``-f``/
+    # ``-c`` consume their whole tail.
     if cmd in _VALUE_PREFIX_CMDS and len(tok) > 2 and tok[:2] in allowed:
+        return True
+    # ``sort``-style value-bearing heads (``-k``/``-t``/``-S``): a glued token
+    # head-matches ONLY when its 2-char head is a value-bearing head for ``cmd``
+    # (these consume their whole tail). Any other glued bundle (``-ro``) falls
+    # through to abstain — closes W4/LV-3 (D-11).
+    value_heads = _VALUE_BEARING_FLAGS.get(cmd)
+    if value_heads is not None and len(tok) > 2 and tok[:2] in value_heads:
         return True
     return False
 
