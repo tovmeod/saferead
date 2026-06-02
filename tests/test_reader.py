@@ -44,6 +44,16 @@ def ctx() -> Context:
         "cut -d: -f1 f",  # value-bearing short flags (2-char-head match)
         "tail -5 f",  # historic -NUM line-count form
         "file /etc/hosts",  # bare file PATH stays allow
+        # sort read-only forms (D-04/D-05) — separate-token and glued value flags
+        "sort -n f",
+        "sort -r f",
+        "sort -u f",
+        "sort -c f",
+        "sort -k2 f",  # glued value-bearing head (-k)
+        "sort -t: f",  # glued value-bearing head (-t)
+        "sort -S 2M f",  # separate-token buffer size (D-05 admit)
+        "sort -S2M f",  # glued value-bearing head (-S)
+        "sort --reverse f",  # long form
     ],
 )
 def test_reader_allows_read_only(segment: str, ctx: Context) -> None:
@@ -77,10 +87,37 @@ def test_reader_cat_is_allow_prover(ctx: Context) -> None:
         'cat "$(id)"',  # cmdsub: tokenizer abstains; reader carries no $-logic
         'cat "${x@P}"',  # brace-body transform: tokenizer abstains
         "echo $((1 << 2))",  # arithmetic: tokenizer allowlist holds the abstain
+        # sort hidden-write/exec forms (D-04/D-05/D-11) — never claimed
+        "sort -o f",  # W2 output-redirect flag
+        "sort --output=f",  # W2 long form
+        "sort -ofile f",  # W2 glued long form
+        "sort -ro f",  # W4 bundle smuggle (LV-3) — the cardinal close
+        "sort -T /x f",  # D-05 omit — temp-dir redirect
+        "sort --compress-program=gzip f",  # W6 exec
     ],
 )
 def test_reader_abstains(segment: str, ctx: Context) -> None:
     assert recognize_reader(segment, ctx) is None
+
+
+def test_reader_abstains_on_sort_output_forms(ctx: Context) -> None:
+    """W2/W4/W6/LV-3: sort write/exec forms never allow.
+
+    `-o`/`--output`/`-ofile` write a file (W2). `-ro` smuggles `-o` past the
+    allowlist via a short-flag bundle (W4/LV-3 — the `sed -ie`/C2 class).
+    `--compress-program` execs an arbitrary program (W6). All must abstain.
+    """
+    for segment in (
+        "sort -o f",
+        "sort --output=f",
+        "sort -ofile f",
+        "sort -ro f",
+        "sort -no f",
+        "sort -uo f",
+        "sort --compress-program=gzip f",
+        "sort -T /x f",
+    ):
+        assert recognize_reader(segment, ctx) is None, segment
 
 
 def test_reader_abstains_on_rm(ctx: Context) -> None:
