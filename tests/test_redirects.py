@@ -52,6 +52,14 @@ def ctx() -> Context:
         # /tmp single-component scratch (split)
         [">", "/tmp/scratch"],
         [">>", "/tmp/log"],
+        # WR-01: an arbitrary high fd-numbered redirect to a /tmp scratch target
+        # is admitted — the ``\d*`` operator head accepts any descriptor, and the
+        # target is still only a single-component /tmp write (within policy, not a
+        # false-allow). Pinned so the accepted fd surface is intentional.
+        ["3>/tmp/x"],
+        ["9>/tmp/x"],
+        ["10>/tmp/x"],
+        ["3>", "/tmp/x"],  # split form
         # plain operands / flags with no redirect at all
         [],
         ["foo.txt"],
@@ -88,6 +96,10 @@ def test_redirect_tail_allow(arg_tokens: list[str]) -> None:
         [">file"],
         [">out.txt"],
         ["2>/etc/x"],
+        # WR-01: a high fd number does NOT bypass the target gate — a
+        # fd-numbered redirect to a real (non-/tmp, non-discard) file abstains.
+        ["3>/etc/passwd"],
+        ["9>out.txt"],
         [">~/.bashrc"],
         [">", "out.txt"],
         # SAFETY FLOOR: append / combined-redirect to a real file

@@ -69,6 +69,13 @@ _DISCARD_REDIR = re.compile(
 #: A token that is EXACTLY a redirect operator (the split / spaced form). The
 #: NEXT token is its target. Covers ``>``, ``>>``, ``2>``, ``2>>``, fd-numbered
 #: ``M>``/``M>>``, and the combined ``&>``/``&>>``.
+#:
+#: The ``\d*`` fd head is INTENTIONALLY unbounded (WR-01): ANY descriptor number
+#: (``3>``, ``9>``, ``10>``, …) is admitted as an ordinary redirect. This is
+#: safe because the fd number never relaxes the TARGET gate — the captured
+#: target is still subject to ``_target_is_safe`` (discard or single-component
+#: ``/tmp`` only). ``3>/etc/passwd`` therefore abstains; ``3>/tmp/x`` is just a
+#: ``/tmp`` scratch write (within policy). Tests pin both directions.
 _REDIR_OPERATOR = re.compile(r"(?:\d*>>?|&>>?)")
 
 #: A glued redirect: an operator head immediately followed by a target. The
