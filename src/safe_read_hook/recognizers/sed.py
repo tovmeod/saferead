@@ -32,6 +32,7 @@ from __future__ import annotations
 from ..context import Context
 from ..tokenizer import tokenize
 from ..verdict import Verdict
+from ._quoting import strip_one_quote_layer
 from .redirects import redirect_tail_is_safe
 
 #: EXACT-MATCH safe option tokens (Pitfall 2). A leading ``-``-token is admitted
@@ -418,20 +419,7 @@ def recognize_sed(segment: str, ctx: Context) -> Verdict | None:
     # EVERY script must classify clean (strip one quote layer first — the
     # tokenizer keeps a quoted script with its quotes).
     for raw in scripts:
-        if not _script_is_read_only(_strip_one_quote_layer(raw)):
+        if not _script_is_read_only(strip_one_quote_layer(raw)):
             return None
 
     return Verdict("allow", "read-only sed", "sed")
-
-
-def _strip_one_quote_layer(token: str) -> str:
-    """Strip a single surrounding matched single/double quote pair, if present.
-
-    The tokenizer emits a quoted script with its quotes intact (``'s/a/b/'``);
-    the mini-parser wants the script WITHOUT the shell quoting. Only a single
-    outer layer is stripped; an unbalanced or unquoted token is returned
-    unchanged. (Copied verbatim from ``reader.py`` per the plan interface.)
-    """
-    if len(token) >= 2 and token[0] == token[-1] and token[0] in "'\"":
-        return token[1:-1]
-    return token

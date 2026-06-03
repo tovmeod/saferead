@@ -43,6 +43,7 @@ from ..analyzers import ANALYZERS
 from ..context import Context
 from ..tokenizer import tokenize
 from ..verdict import Verdict
+from ._quoting import strip_one_quote_layer
 from .redirects import redirect_tail_is_safe
 
 # echo / printf.
@@ -417,7 +418,7 @@ def recognize_reader(segment: str, ctx: Context) -> Verdict | None:
     # the quoted source to the language analyzer.
     lang = _SUBLANG_CMDS.get(cmd)
     if lang is not None and len(args) == 2 and args[0] == "-c":
-        source = _strip_one_quote_layer(args[1])
+        source = strip_one_quote_layer(args[1])
         return ANALYZERS[lang](source)
 
     if cmd not in _READ_ONLY_CMDS:
@@ -427,16 +428,3 @@ def recognize_reader(segment: str, ctx: Context) -> Verdict | None:
         return None
 
     return Verdict("allow", "read-only command", "reader")
-
-
-def _strip_one_quote_layer(token: str) -> str:
-    """Strip a single surrounding matched single/double quote pair, if present.
-
-    The tokenizer emits a quoted argument with its quotes intact (``"import
-    os"``); the analyzer wants the source WITHOUT the shell quoting. Only a
-    single outer layer is stripped (sufficient for the recognized shape); an
-    unbalanced or unquoted token is returned unchanged.
-    """
-    if len(token) >= 2 and token[0] == token[-1] and token[0] in "'\"":
-        return token[1:-1]
-    return token
