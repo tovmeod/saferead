@@ -39,6 +39,12 @@ def ctx() -> Context:
         "echo x >/tmp/foo",
         "echo x >/tmp/scratch",
         "cat f >>/tmp/log",
+        # REC-06 (D-05): fd-dup forms (>&N) now allow — they duplicate a file
+        # descriptor and never write a user file. The old reader's _DISCARD_REDIR
+        # lacked >&N (only 2>&1), so these previously abstained; the shared
+        # helper's \\d*>&\\d+ classifies them as discard.
+        "echo hi >&2",
+        "grep x f 1>&2",
         # CR-02: common safe-flag reads stay allow via the per-command allowlist.
         "grep -i needle f",
         "head -n 5 f",
