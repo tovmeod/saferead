@@ -12,10 +12,11 @@ Policy (D-03):
   file-descriptor duplication ``>&N`` / ``M>&N`` (e.g. ``>&2``).
 - A genuine single-component ``/tmp`` scratch target is safe: ``>/tmp/scratch``,
   ``>>/tmp/log``, ``2>/tmp/err`` (glued OR split ``> /tmp/scratch``). The target
-  must match ``^/tmp/[^/\\s;&|`$]+$`` AND the single component must not be ``.``
-  or ``..`` — so a second ``/`` (``/tmp/sub/file``), a ``..`` traversal
-  (``/tmp/../etc/passwd``), a bare ``>/tmp`` (no component), and any shell
-  metacharacter are all rejected.
+  must match ``^/tmp/[A-Za-z0-9._-]+$`` (an ALLOWLIST charset) AND the single
+  component must not be ``.`` or ``..`` — so a second ``/`` (``/tmp/sub/file``),
+  a ``..`` traversal (``/tmp/../etc/passwd``), a bare ``>/tmp`` (no component),
+  a glued second redirect (``>/tmp/a>b``), and any shell metacharacter are all
+  rejected by construction.
 - SAFETY FLOOR (cardinal): the discard and ``/tmp`` carve-outs are layered ON
   TOP of the old reader's blanket ``>``/``&`` veto, NOT a replacement for it.
   After the carve-outs, ANY token still containing ``>`` or ``&`` returns
@@ -75,9 +76,14 @@ _REDIR_OPERATOR = re.compile(r"(?:\d*>>?|&>>?)")
 _GLUED_REDIR = re.compile(r"(?:\d*>>?|&>>?)(.+)")
 
 #: A single-component ``/tmp`` scratch target: literally ``/tmp/`` then exactly
-#: one path component with no ``/``, whitespace, or shell metacharacter. The
-#: ``.``/``..`` components are rejected separately (the char class admits ``.``).
-_TMP_SCRATCH = re.compile(r"/tmp/([^/\s;&|`$]+)")
+#: one path component drawn from an ALLOWLIST of ordinary filename chars only.
+#: This fails closed by construction — any char NOT on the list (a second
+#: redirect ``>``/``<``, whitespace, a shell metacharacter, a second ``/``) is
+#: rejected, so a glued second redirect (``>/tmp/a>b`` -> two bash redirects,
+#: the second writing a real cwd file) cannot pass (CR-01). The project's
+#: allowlist philosophy: unanticipated metacharacters never reach the carve-out.
+#: The ``.``/``..`` components are rejected separately (the class admits ``.``).
+_TMP_SCRATCH = re.compile(r"/tmp/([A-Za-z0-9._-]+)")
 
 
 def _target_is_safe(target: str) -> bool:

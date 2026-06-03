@@ -96,6 +96,15 @@ def test_redirect_tail_allow(arg_tokens: list[str]) -> None:
         # metacharacter in target
         [">/tmp/a;b"],
         [">/tmp/a|b"],
+        # CR-01: a SECOND redirect operator glued into the /tmp target. In bash
+        # ``>/tmp/a>b`` is two redirects (stdout->/tmp/a, then stdout->relative
+        # file ``b`` in cwd — a real state mutation). The allowlist /tmp charset
+        # must reject ``>``/``<`` in the component so these fail closed.
+        [">/tmp/a>b"],
+        [">", "/tmp/a>b"],  # split form, same root cause
+        [">/tmp/a<b"],
+        [">/tmp/a>/etc/passwd"],  # absolute second target (was already blocked)
+        ["2>/tmp/a>b"],
     ],
 )
 def test_redirect_tail_abstain(arg_tokens: list[str]) -> None:
@@ -113,5 +122,26 @@ def test_redirect_traversal_folds_non_allow(ctx: Context) -> None:
     """
     result = tokenize("echo x >/tmp/../etc/passwd")
     assert result.abstain_reason is None
+    verdict = fold(result.segments, ctx)
+    assert verdict is None or verdict.decision != "allow"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo x >/tmp/a>b",
+        "find . -type f >/tmp/a>b",
+        "sed 's/a/b/' f >/tmp/a>b",
+    ],
+)
+def test_glued_second_redirect_folds_non_allow(command: str, ctx: Context) -> None:
+    """CR-01: a glued second redirect writes a real cwd file -> must never allow.
+
+    All three recognizers (reader/find/sed) delegate redirect safety to the one
+    shared helper, so a single allowlist-charset fix must close the cardinal
+    false-allow for every caller through the live ``tokenize -> fold`` path.
+    """
+    result = tokenize(command)
+    assert result.abstain_reason is None  # token reaches the helper
     verdict = fold(result.segments, ctx)
     assert verdict is None or verdict.decision != "allow"
