@@ -15,12 +15,18 @@ from ..verdict import Verdict
 from .find import recognize_find
 from .git import recognize_git
 from .reader import recognize_reader
+from .sed import recognize_sed
 
 #: The uniform recognizer contract (D-01).
 Recognizer = Callable[[str, Context], "Verdict | None"]
 
 #: Ordered registry; order is significant (D-02). Reader stays FIRST (the common
-#: read path); the git and find recognizers follow (CORE-04 — one list edit per
-#: new recognizer, no engine change). Order among the latter is immaterial: they
-#: claim disjoint leading commands (``git`` / ``find``).
-REGISTRY: list[Recognizer] = [recognize_reader, recognize_git, recognize_find]
+#: read path); the git, find, and sed recognizers follow (CORE-04 — one list
+#: edit per new recognizer, no engine change). Order among the latter is
+#: immaterial: they claim disjoint leading commands (``git`` / ``find`` / ``sed``).
+REGISTRY: list[Recognizer] = [
+    recognize_reader,
+    recognize_git,
+    recognize_find,
+    recognize_sed,
+]
