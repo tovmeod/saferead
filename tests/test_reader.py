@@ -35,6 +35,10 @@ def ctx() -> Context:
         "ls -la",
         "echo hi >/dev/null",
         "grep x f 2>&1",
+        # REC-06 (D-03b/D-05): single-component /tmp scratch redirect now allows
+        "echo x >/tmp/foo",
+        "echo x >/tmp/scratch",
+        "cat f >>/tmp/log",
         # CR-02: common safe-flag reads stay allow via the per-command allowlist.
         "grep -i needle f",
         "head -n 5 f",
@@ -84,7 +88,6 @@ def test_reader_cat_is_allow_prover(ctx: Context) -> None:
         "rm -rf x",  # not read-only -> the veto input for the compound proof
         "tee f",  # write-mode command, not claimed (deferred phase)
         "sort -o f",  # write-mode command, not claimed (deferred phase)
-        "echo x >/tmp/foo",  # redirect to a real file -> no false-allow (999.1 #7)
         "echo x >/tmp/../etc/passwd",  # path-escaping redirect -> no false-allow
         "cat foo.txt > out.txt",  # redirect to a user file -> no false-allow
         "ls &",  # background control op -> no false-allow (rewrite regression guard)

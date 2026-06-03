@@ -43,10 +43,7 @@ from ..analyzers import ANALYZERS
 from ..context import Context
 from ..tokenizer import tokenize
 from ..verdict import Verdict
-
-# Discard redirects that never write a user file. Safe to keep as allow. A token
-# matching this exactly (``fullmatch``) is permitted in the argument tail.
-_DISCARD_REDIR = re.compile(r"(?:2>&1|>/dev/null|2>/dev/null|&>>?/dev/null)")
+from .redirects import redirect_tail_is_safe
 
 # echo / printf.
 _CMD_ECHO = frozenset({"echo", "printf"})
@@ -345,12 +342,14 @@ def _flag_is_read_only(cmd: str, tok: str) -> bool:
 
 
 def _tail_is_safe(cmd: str, arg_tokens: list[str]) -> bool:
-    """True iff every trailing token is a safe arg, flag, or discard redirect.
+    """True iff every trailing token is a safe arg, flag, or safe redirect.
 
-    Fences retained from the seed: a discard redirect (``>/dev/null`` etc.)
-    ``fullmatch`` is permitted; a token carrying a ``>`` redirect to a real file
-    or a ``&`` background/control operator -> abstain (the tokenizer leaves both
-    glued into a word token, so the reader inspects token TEXT).
+    The redirect decision is delegated WHOLLY to the shared
+    ``redirect_tail_is_safe`` helper (D-05): it owns the discard-redirect
+    classification and the hardened ``/tmp`` scratch policy (glued AND split
+    shapes), and its SAFETY FLOOR rejects any other token bearing ``>`` or
+    ``&``. The reader calls it first and abstains if it returns ``False``; the
+    helper is the single definition of the redirect policy reused by find/sed.
 
     CR-02 flag policy: a token that LOOKS like an option flag (starts with
     ``-``, excluding bare ``-``/``--``) -> abstain UNLESS it is on ``cmd``'s
@@ -360,20 +359,24 @@ def _tail_is_safe(cmd: str, arg_tokens: list[str]) -> bool:
     W3 positional-operand fence (D-10): for a command in
     ``_OUTPUT_OPERAND_CMDS`` (``uniq``/``xxd``), whose SECOND positional is an
     OUTPUT file, abstain when there are >= 2 bare operand tokens (a non-flag,
-    non-discard-redirect token; ``-`` stdin counts as an operand). This closes
-    the un-flagged positional write LV-1/LV-2. Scoped to those commands only —
+    non-redirect token; ``-`` stdin counts as an operand). This closes the
+    un-flagged positional write LV-1/LV-2. Scoped to those commands only —
     inputs-only multi-operand reads stay allow.
 
     Over-abstains only on a *quoted* ``">"``/``"&"`` argument or an unlisted
     flag — a safe coverage loss (prompt the command), never a false-allow.
     """
+    # Redirect policy is owned by the shared helper (D-05). Abstain on any
+    # unsafe redirect/control token before the flag + operand classification.
+    if not redirect_tail_is_safe(arg_tokens):
+        return False
     operand_count = 0
     fence_operands = cmd in _OUTPUT_OPERAND_CMDS
     for tok in arg_tokens:
-        if _DISCARD_REDIR.fullmatch(tok):
-            continue
+        # Redirect / control tokens were already cleared by the helper above;
+        # skip them so the W3 operand count is unchanged from today.
         if ">" in tok or "&" in tok:
-            return False
+            continue
         if tok.startswith("-") and tok not in ("-", "--"):
             if not _flag_is_read_only(cmd, tok):
                 return False
