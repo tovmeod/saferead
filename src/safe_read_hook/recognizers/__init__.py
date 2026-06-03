@@ -12,6 +12,7 @@ from collections.abc import Callable
 
 from ..context import Context
 from ..verdict import Verdict
+from .find import recognize_find
 from .git import recognize_git
 from .reader import recognize_reader
 
@@ -19,6 +20,7 @@ from .reader import recognize_reader
 Recognizer = Callable[[str, Context], "Verdict | None"]
 
 #: Ordered registry; order is significant (D-02). Reader stays FIRST (the common
-#: read path); the git recognizer follows (CORE-04 — one list edit per new
-#: recognizer, no engine change).
-REGISTRY: list[Recognizer] = [recognize_reader, recognize_git]
+#: read path); the git and find recognizers follow (CORE-04 — one list edit per
+#: new recognizer, no engine change). Order among the latter is immaterial: they
+#: claim disjoint leading commands (``git`` / ``find``).
+REGISTRY: list[Recognizer] = [recognize_reader, recognize_git, recognize_find]
