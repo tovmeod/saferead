@@ -139,6 +139,42 @@ def test_sed_substitution_hidden_flag_script_abstain(
     assert recognize_sed(segment, ctx) is None
 
 
+# --- discriminating cardinal-boundary: a real command vs literal field data
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        # A ``w`` / ``;`` inside the s/// replacement FIELD is literal data, so
+        # the script is still a single read-only substitution -> allow.
+        "sed 's/x/yz; w out/' f",
+        "sed '{p;d}' f",  # a BARE command group classifies its read-only contents
+    ],
+)
+def test_sed_literal_field_data_script_allow(segment: str, ctx: Context) -> None:
+    verdict = recognize_sed(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "sed 's/x/y/; w out' f",  # a real w command AFTER a complete s/// -> abstain
+        "sed 's/a\\/b/c/w out' f",  # escaped delimiter, the trailing w is a real flag
+        "sed 'p;d;e cmd' f",  # an exec reached after read-only commands -> abstain
+        # An ADDRESSED command group (``/re/{...}``) abstains: the parser admits
+        # bare ``{`` between commands but not after an address. Coverage loss,
+        # NOT a false-allow (the cardinal-safe direction).
+        "sed '/re/{p;d}' f",
+    ],
+)
+def test_sed_real_command_after_field_script_abstain(
+    segment: str, ctx: Context
+) -> None:
+    assert recognize_sed(segment, ctx) is None
+
+
 # --- unknown command / tokenizer abstain ----------------------------------
 
 

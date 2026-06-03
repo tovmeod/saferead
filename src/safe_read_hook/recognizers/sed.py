@@ -358,7 +358,8 @@ def recognize_sed(segment: str, ctx: Context) -> Verdict | None:
 
         if tok.startswith("-") and tok not in ("-", "--"):
             # A long option may carry a glued ``=value`` — split on the FIRST
-            # ``=`` and EXACT-match the name (no startswith/prefix matching).
+            # ``=`` and EXACT-match the option name (no prefix matching: the
+            # name is tested for set membership, never a leading substring).
             name, sep, value = tok.partition("=")
             if sep == "=":
                 if name in _SCRIPT_OPTIONS:
