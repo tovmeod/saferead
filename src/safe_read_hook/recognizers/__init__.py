@@ -15,6 +15,7 @@ from ..verdict import Verdict
 from .adb import recognize_adb
 from .find import recognize_find
 from .git import recognize_git
+from .gradle import recognize_gradle
 from .pytest_runner import recognize_pytest
 from .reader import recognize_reader
 from .sed import recognize_sed
@@ -23,10 +24,11 @@ from .sed import recognize_sed
 Recognizer = Callable[[str, Context], "Verdict | None"]
 
 #: Ordered registry; order is significant (D-02). Reader stays FIRST (the common
-#: read path); the git, find, sed, and adb recognizers follow (CORE-04 — one
-#: list edit per new recognizer, no engine change). Order among the latter is
-#: immaterial: they claim disjoint leading commands (``git`` / ``find`` / ``sed``
-#: / ``adb`` / a ``pytest`` launcher shape).
+#: read path); the git, find, sed, adb, pytest, and gradle recognizers follow
+#: (CORE-04 — one list edit per new recognizer, no engine change). Order among
+#: the latter is immaterial: they claim disjoint leading commands (``git`` /
+#: ``find`` / ``sed`` / ``adb`` / a ``pytest`` launcher shape / a ``gradle``
+#: launcher shape).
 REGISTRY: list[Recognizer] = [
     recognize_reader,
     recognize_git,
@@ -34,4 +36,5 @@ REGISTRY: list[Recognizer] = [
     recognize_sed,
     recognize_adb,
     recognize_pytest,
+    recognize_gradle,
 ]
