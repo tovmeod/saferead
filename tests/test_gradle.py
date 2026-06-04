@@ -92,6 +92,41 @@ def test_gradle_property_uppercase_allow_not_overblocked(ctx: Context) -> None:
     assert v.decision == "allow"
 
 
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "gradle -Pp build",  # blocked letter ``p`` INSIDE a -P value -> allow
+        "gradle -Pgpr.key=val build",  # ``g``/``p`` inside a -P value -> allow
+        "gradle -Dorg.gradle.parallel=true build",  # ``g`` inside a -D value -> allow
+        "gradle -si tasks",  # benign no-arg cluster (not all clusters over-blocked)
+    ],
+)
+def test_gradle_glued_value_and_benign_cluster_task_allow(
+    segment: str, ctx: Context
+) -> None:
+    # The bundled-cluster scan must NOT trip on a blocked LETTER that lives
+    # inside a -P/-D glued VALUE, nor over-block a benign no-arg cluster.
+    v = recognize_gradle(segment, ctx)
+    assert v is not None
+    assert v.decision == "allow"
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "gradle -ip /other",  # bundled cluster -i -p (project-dir) -> abstain
+        "gradle -ip/other",  # self-contained glued cluster -> abstain
+    ],
+)
+def test_gradle_bundled_cluster_redirection_abstain(
+    segment: str, ctx: Context
+) -> None:
+    # A blocked value-bearing flag NOT at the head of a getopt cluster
+    # (``-ip`` = ``-i -p``) would redirect the project; gradle's parser cannot be
+    # verified here, so per D8-04 (when unsure, abstain) it blocks.
+    assert recognize_gradle(segment, ctx) is None
+
+
 # --- redirection DENYLIST abstain (ported seed blocks) --------------------
 
 

@@ -115,21 +115,57 @@ def _is_gradle_exe(tok: str) -> bool:
     )
 
 
+#: The bare blocked short-flag LETTERS (without the leading ``-``), used by the
+#: bundled-cluster scan. Case-sensitive — uppercase ``P``/``D`` are NOT here.
+_BLOCKED_SHORT_LETTERS = frozenset("Ibcpg")
+
+#: Glued-VALUE short options: the remainder after the 2-char head is a VALUE, not
+#: a flag cluster, so a blocked LETTER appearing inside it must NOT trip the
+#: bundled-cluster scan. ``-P`` (project property, ``-Pgpr.key=val``) is
+#: case-verified (T-08-13). ``-D`` (system property, ``-Dorg.gradle.parallel=...``,
+#: very common, ``g`` inside the value) is a KNOWLEDGE-BASED carve-out — omitting
+#: it would only OVER-abstain (the strictly-safe direction), so this is a
+#: coverage choice, not a safety one.
+_GLUED_VALUE_HEADS = frozenset({"-P", "-D"})
+
+
 def _flag_is_blocked(tok: str) -> bool:
     """True iff option token ``tok`` is a redirection blocked flag.
 
-    Catches all three shapes (D8-04 / MEMORY.md flag-audit blindspot): long
+    Catches all FOUR shapes (D8-04 / MEMORY.md flag-audit blindspot): long
     ``--flag=value`` (split on ``=`` before membership), split short (``-b``),
-    and glued short (``-bbuild.gradle`` via the 2-char head). Case-sensitive
-    throughout — ``-P`` is not blocked, ``-p`` is (T-08-13).
+    glued short (``-bbuild.gradle`` via the 2-char head), AND a bundled getopt
+    cluster whose blocked letter is NOT at the head (``-ip`` = ``-i -p`` would
+    redirect the project). Case-sensitive throughout — ``-P`` is not blocked,
+    ``-p`` is (T-08-13).
+
+    The bundled-cluster scan abstains on ANY single-dash token (other than a
+    ``-P``/``-D`` glued-value head) that CONTAINS a blocked letter. gradle is not
+    installed here, so its custom ``CommandLineParser`` clustering semantics
+    cannot be verified empirically (unlike pytest's T-08-07); per D8-04 ("when
+    unsure, abstain — free loss") the conservative direction is to block the
+    cluster. If gradle DOES cluster ``-ip`` -> ``-i -p`` this closes the
+    redirect; if it does NOT, the token would not run a valid gradle anyway, so
+    abstaining is a harmless over-abstain. Either branch -> no false-allow.
     """
     if tok.startswith("--"):
         name = tok.split("=", 1)[0]
         return name in _BLOCKED_LONG
     if tok in _BLOCKED_SHORT:
         return True
-    # glued short (value-bearing): ``-bbuild.gradle``/``-p/other``/``-g/home``.
-    return len(tok) > 2 and tok[:2] in _BLOCKED_SHORT
+    if len(tok) <= 2:
+        return False
+    # glued short (value-bearing) at the head: ``-bbuild.gradle``/``-p/other``.
+    if tok[:2] in _BLOCKED_SHORT:
+        return True
+    # glued-VALUE head (``-P``/``-D``): the remainder is a VALUE, never a cluster
+    # of flags — a blocked letter inside it must NOT trip (preserves ``-Pkey=val``,
+    # ``-Pgpr.key=val``, ``-Dorg.gradle.parallel=true``).
+    if tok[:2] in _GLUED_VALUE_HEADS:
+        return False
+    # bundled getopt cluster: a blocked letter anywhere after the leading ``-``
+    # (e.g. ``-ip`` = ``-i -p``) -> abstain (conservative, unverifiable parser).
+    return any(c in _BLOCKED_SHORT_LETTERS for c in tok[1:])
 
 
 def recognize_gradle(segment: str, ctx: Context) -> Verdict | None:
