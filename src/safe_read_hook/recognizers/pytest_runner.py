@@ -59,6 +59,18 @@ Two stages:
    and the discrimination is exact. A ``-k pdbtest`` value is a SEPARATE
    positional token (``pdbtest``), not a blocked flag.
 
+   BUNDLED-SHORT-FLAG note (T-08-07 audited, NOT a bypass): the short-flag match
+   is a 2-char HEAD match (``tok[:2]``), so a value-bearing blocked flag NOT at
+   the head of a getopt cluster (``-xp plug``, ``-xo addopts=x``, ``-xc cfg``)
+   is not caught by the head check. This was verified EMPIRICALLY to be safe for
+   pytest: pytest (argparse) does NOT cluster ``-xp`` into ``-x -p`` — ``pytest
+   -xp _no_such_plugin`` collects normally WITHOUT attempting the plugin import,
+   and ``pytest -xo addopts=--bogus`` errors with ``unrecognized arguments``
+   (the injection does NOT happen). The blocked short flags ``-p``/``-c``/``-o``
+   are value-bearing and pytest only honors them as a standalone token or a
+   glued head (``-pplug``) — both of which ARE caught. So the head-only match is
+   sufficient for pytest's actual getopt behavior (no live false-allow).
+
 3. The trailing redirect is routed through the shared ``redirect_tail_is_safe``
    (the D-05 ``/dev/null`` + ``/tmp`` policy).
 
