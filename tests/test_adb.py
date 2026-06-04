@@ -34,6 +34,7 @@ import pytest
 from safe_read_hook.context import Context
 from safe_read_hook.engine import fold
 from safe_read_hook.recognizers.adb import recognize_adb
+from safe_read_hook.tokenizer import tokenize
 
 
 @pytest.fixture
@@ -200,3 +201,43 @@ def test_adb_allow_through_fold(ctx: Context) -> None:
 
 def test_adb_shell_mutating_through_fold_abstain(ctx: Context) -> None:
     assert fold(["adb shell rm -rf /"], ctx) is None
+
+
+# --- adb shell trust-laundering regression (CR-01, D8-06) ------------------
+#
+# The ``adb shell`` re-entry must re-fold the remote command over ONLY the
+# genuinely-read-only recognizers (reader/find/sed/git). It MUST NOT inherit the
+# opt-in-TRUST pytest/gradle recognizers, whose ``allow`` is a local-project
+# trust grant, NOT a read-only proof (D8-01). Folding through the full REGISTRY
+# launders that trust grant into a DEVICE-side genuine-read-only allow — the
+# cardinal false-allow this phase exists to prevent. These assert through the
+# live engine ``fold`` (the path the hook actually takes).
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "adb shell gradle build",  # gradle allow is opt-in-trust, NOT read-only
+        "adb shell pytest",  # pytest executes arbitrary code on device
+        "adb shell ./gradlew assembleRelease",  # full release build on device
+    ],
+)
+def test_adb_shell_trust_laundering_abstain(segment: str, ctx: Context) -> None:
+    assert fold(tokenize(segment).segments, ctx) is None
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "adb shell ls",  # read-only reader form must STAY allow
+        "adb shell cat /sdcard/f",
+        "adb shell grep foo /sdcard/f",
+    ],
+)
+def test_adb_shell_readonly_through_fold_allow(segment: str, ctx: Context) -> None:
+    # The scoped re-fold must NOT over-abstain on the genuinely-read-only forms;
+    # the outer verdict stays the ``adb`` tag.
+    verdict = fold(tokenize(segment).segments, ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "adb"

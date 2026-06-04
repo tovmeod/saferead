@@ -196,6 +196,32 @@ def test_gradle_non_launcher_task_abstain(segment: str, ctx: Context) -> None:
     assert recognize_gradle(segment, ctx) is None
 
 
+# --- long-flag prefix-abbreviation redirection abstain (WR-01, D8-04) ------
+#
+# gradle's CommandLineParser accepts unambiguous PREFIX ABBREVIATIONS of long
+# options, so ``--build-f`` resolves to ``--build-file``, ``--init-scr`` to
+# ``--init-script``, etc. An exact-membership denylist misses these, leaving a
+# build-file/init-script redirect (foreign-project injection) un-blocked. gradle
+# is not installed here, so per D8-04 (can't verify -> abstain conservatively)
+# ANY ``--xxx`` token that is an unambiguous prefix of a blocked long flag must
+# abstain.
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "gradle --build-f other.gradle build",  # abbrev of --build-file
+        "gradle --init-scr evil.gradle build",  # abbrev of --init-script
+        "gradle --settings-f other.gradle",  # abbrev of --settings-file
+        "gradle --project-d /other build",  # abbrev of --project-dir
+    ],
+)
+def test_gradle_long_flag_abbreviation_redirection_abstain(
+    segment: str, ctx: Context
+) -> None:
+    assert recognize_gradle(segment, ctx) is None
+
+
 # --- live fold-path wiring ------------------------------------------------
 
 
