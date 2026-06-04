@@ -44,8 +44,11 @@ Two stages:
                        --project-cache-dir,  --gradle-user-home / -g
 
    Matching rules:
-   - long ``--flag=value`` / split: split on ``=`` before membership in
-     ``_BLOCKED_LONG`` (the FLAG token is the trigger either way).
+   - long ``--flag=value`` / split: split on ``=``, then block if the flag name
+     is a PREFIX of (or equals) any ``_BLOCKED_LONG`` entry — gradle accepts
+     unambiguous prefix abbreviations (``--build-f`` -> ``--build-file``), so an
+     exact match would miss the abbreviated redirect (WR-01, D8-04). Prefix
+     matching over-abstains at worst on a benign shared-prefix flag (free loss).
    - short flags are CASE-SENSITIVE and value-bearing: split exact (``-b
      other.gradle``) and glued head (``-bbuild.gradle``, ``-p/other``,
      ``-g/home``) via the 2-char head in ``_BLOCKED_SHORT``. CRITICAL
@@ -54,9 +57,8 @@ Two stages:
      case-sensitive comparison — tokens are NEVER lowercased, so ``-P`` is not
      in ``_BLOCKED_SHORT`` and passes through for free.
 
-   Residual (smaller than the accepted polarity hole, NOT blocking): gradle
-   long-option prefix-abbreviation (``--build-f`` for ``--build-file``) would
-   miss the exact split-membership match. Noted, not closed.
+   Long-option prefix-abbreviation (``--build-f`` for ``--build-file``) is
+   CLOSED (WR-01): the long-flag match is by prefix, not exact membership.
 
 3. The trailing redirect is routed through the shared ``redirect_tail_is_safe``
    (the D-05 ``/dev/null`` + ``/tmp`` policy).
@@ -133,7 +135,8 @@ def _flag_is_blocked(tok: str) -> bool:
     """True iff option token ``tok`` is a redirection blocked flag.
 
     Catches all FOUR shapes (D8-04 / MEMORY.md flag-audit blindspot): long
-    ``--flag=value`` (split on ``=`` before membership), split short (``-b``),
+    ``--flag=value`` (split on ``=``, then PREFIX-abbreviation match against
+    ``_BLOCKED_LONG`` per WR-01), split short (``-b``),
     glued short (``-bbuild.gradle`` via the 2-char head), AND a bundled getopt
     cluster whose blocked letter is NOT at the head (``-ip`` = ``-i -p`` would
     redirect the project). Case-sensitive throughout — ``-P`` is not blocked,
@@ -150,7 +153,16 @@ def _flag_is_blocked(tok: str) -> bool:
     """
     if tok.startswith("--"):
         name = tok.split("=", 1)[0]
-        return name in _BLOCKED_LONG
+        # Prefix-abbreviation match (WR-01, D8-04): gradle's CommandLineParser
+        # accepts unambiguous PREFIX abbreviations of long options, so
+        # ``--build-f`` resolves to ``--build-file``, ``--init-scr`` to
+        # ``--init-script``. Exact membership would miss these, leaving a
+        # build-file/init-script redirect un-blocked. gradle is not installed
+        # here, so per D8-04 (can't verify -> abstain conservatively) treat ANY
+        # ``--xxx`` token that is a prefix of a blocked long flag as blocked. At
+        # worst this over-abstains on a benign flag sharing a prefix — free
+        # coverage loss, the strictly-safe direction.
+        return any(blocked.startswith(name) for blocked in _BLOCKED_LONG)
     if tok in _BLOCKED_SHORT:
         return True
     if len(tok) <= 2:

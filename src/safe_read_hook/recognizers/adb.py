@@ -39,9 +39,22 @@ project code). Two surfaces, each allowlist-polarity (D-05/D-16):
 2. ``adb shell <cmd>`` — the engine RE-ENTRY seam (D8-06) Phase 13's
    ssh-journalctl recognizer inherits. The remote command string (sliced RAW
    from the segment AFTER the ``shell`` word so quoting is preserved) is
-   re-decomposed through the EXISTING engine ``fold``:
+   re-decomposed through ``_fold_readonly`` — a SCOPED clone of the engine
+   ``fold`` whose recognizer set is an explicit ALLOWLIST of the genuinely
+   read-only recognizers (reader/find/sed/git), NOT the global ``REGISTRY``:
 
-       inner = fold(tokenize(remote).segments, ctx)
+       inner = _fold_readonly(tokenize(remote).segments, ctx)
+
+   CARDINAL (CR-01) — the full ``REGISTRY`` now includes ``recognize_pytest``
+   and ``recognize_gradle``, whose ``allow`` is an opt-in TRUST grant on the
+   user's LOCAL project (D8-01: "allow != proven read-only"), NOT a read-only
+   proof. Folding the DEVICE-side command through the full registry would
+   launder that local trust into a device-side genuine-read-only allow — the
+   cardinal false-allow. ``_fold_readonly`` excludes pytest/gradle/adb so
+   ``adb shell gradle build`` / ``adb shell pytest`` abstain; an ALLOWLIST means
+   any future trust-grant recognizer defaults to not-trusted here. D8-06: "Allow
+   only if EVERY segment of the remote command string is itself recognized
+   READ-ONLY by the existing engine (cat/grep/ls/find/sed/...)."
 
    - bare ``adb shell`` (no remote command) opens an INTERACTIVE shell -> abstain.
    - a shell OPTION before the command (``-t``/``-T``/``-x``/``-n``) -> abstain
@@ -209,12 +222,59 @@ def _recognize_adb_shell(
     idx = segment.index("shell") + len("shell")
     remote = segment[idx:]
 
-    # Re-decompose the remote command through the EXISTING engine (lazy import
-    # avoids the circular import; ``engine.py`` stays byte-untouched).
-    from ..engine import fold
-
-    inner = fold(tokenize(remote).segments, ctx)
+    # Re-decompose the remote command over the SCOPED read-only recognizer set
+    # (NOT the full REGISTRY). ``engine.py`` stays byte-untouched.
+    inner = _fold_readonly(tokenize(remote).segments, ctx)
     if inner is None or inner.decision == "ask":
         return None
     # Re-wrap as an adb verdict so the tag identifies THIS recognizer.
     return Verdict("allow", "adb shell read", "adb")
+
+
+def _fold_readonly(segments: list[str], ctx: Context) -> Verdict | None:
+    """Fold ``segments`` over ONLY the genuinely-read-only recognizers (CR-01).
+
+    A SCOPED clone of ``engine.fold`` whose recognizer set is an explicit
+    ALLOWLIST — reader/find/sed/git — NOT the global ``REGISTRY``. This is the
+    cardinal CR-01 fix: the full registry now includes ``recognize_pytest`` and
+    ``recognize_gradle``, whose ``allow`` is an opt-in TRUST grant on the user's
+    LOCAL project (D8-01: "allow != proven read-only"), NOT a read-only proof.
+    Folding the DEVICE-side command through the full registry would launder that
+    local-project trust into a device-side genuine-read-only allow — the
+    cardinal false-allow. ``adb`` itself is also excluded (an inner ``adb`` is
+    not a read-only proof here either). An ALLOWLIST means any FUTURE trust-grant
+    recognizer defaults to not-trusted under ``adb shell`` (D8-06).
+
+    The two ``fold`` semantics are preserved EXACTLY: (1) abstain-veto — if ANY
+    segment is unrecognized by every allowed recognizer, return ``None``; (2)
+    precedence ``ask`` > ``allow``, returning a literal input Verdict.
+
+    Lazy imports keep the existing circular-import discipline (``recognizers/
+    __init__`` -> ``adb`` -> ``engine`` -> ``recognizers/__init__``); importing
+    the siblings here, at call time, avoids any import-order coupling.
+    """
+    from .find import recognize_find
+    from .git import recognize_git
+    from .reader import recognize_reader
+    from .sed import recognize_sed
+
+    readonly = (recognize_reader, recognize_find, recognize_sed, recognize_git)
+
+    survivor: Verdict | None = None
+    for segment in segments:
+        match: Verdict | None = None
+        for recognizer in readonly:
+            match = recognizer(segment, ctx)
+            if match is not None:
+                break
+        if match is None:
+            # One unrecognized segment vetoes the whole compound (abstain-veto).
+            return None
+        ask_beats_allow = (
+            survivor is not None
+            and survivor.decision == "allow"
+            and match.decision == "ask"
+        )
+        if survivor is None or ask_beats_allow:
+            survivor = match
+    return survivor
