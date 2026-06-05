@@ -142,6 +142,9 @@ def test_entrypoint_injects_resolved_global_config(monkeypatch, tmp_path) -> Non
     protected set is {"release"} (D-05 replace flows through the entrypoint).
     """
     module = _load_entrypoint_module()
+    # Isolate from an ambient CLAUDE_PROJECT_DIR (Plan 02 made _load_config read it):
+    # these tests pin the GLOBAL-only contract, so the project layer must be skipped.
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     cfg_path = tmp_path / "config.toml"
     cfg_path.write_text('[git]\nprotected_branches = ["release"]\n', encoding="utf-8")
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", cfg_path)
@@ -169,6 +172,7 @@ def test_entrypoint_injects_resolved_global_config(monkeypatch, tmp_path) -> Non
 def test_entrypoint_absent_global_injects_builtin(monkeypatch, tmp_path) -> None:
     """No global config FILE -> the injected config equals builtin_config() (D-08)."""
     module = _load_entrypoint_module()
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)  # GLOBAL-only (Plan 02)
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "does-not-exist.toml")
 
     captured: dict[str, object] = {}
@@ -199,6 +203,7 @@ def test_entrypoint_absent_protected_key_keeps_builtin(monkeypatch, tmp_path) ->
     customizes only the gated set must NOT empty the protected set.
     """
     module = _load_entrypoint_module()
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)  # GLOBAL-only (Plan 02)
     cfg_path = tmp_path / "config.toml"
     cfg_path.write_text('[git]\ngated_subcommands = ["push"]\n', encoding="utf-8")
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", cfg_path)
@@ -227,6 +232,7 @@ def test_entrypoint_absent_protected_key_keeps_builtin(monkeypatch, tmp_path) ->
 def test_entrypoint_malformed_global_degrades_to_builtin(monkeypatch, tmp_path) -> None:
     """A malformed global config degrades to builtin_config() — never crashes."""
     module = _load_entrypoint_module()
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)  # GLOBAL-only (Plan 02)
     cfg_path = tmp_path / "config.toml"
     cfg_path.write_text("this is not = valid = toml [[[", encoding="utf-8")
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", cfg_path)
