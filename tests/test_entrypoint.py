@@ -105,10 +105,10 @@ def test_entrypoint_injects_real_branch_resolver(monkeypatch) -> None:
     captured: dict[str, object] = {}
     real_context = module.Context  # capture BEFORE patching (avoid self-recursion)
 
-    def _capture_context(*, cwd, _resolver):
+    def _capture_context(*, cwd, _resolver, config):
         captured["resolver"] = _resolver
         # Hand back a REAL Context so the entrypoint's fold() path runs normally.
-        return real_context(cwd=cwd, _resolver=_resolver)
+        return real_context(cwd=cwd, _resolver=_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
 
@@ -129,6 +129,111 @@ class _StdinStub:
 
     def read(self) -> str:
         return self._data
+
+
+# --- Phase 9: global config load + injection ------------------------------
+
+
+def test_entrypoint_injects_resolved_global_config(monkeypatch, tmp_path) -> None:
+    """A present global with protected=["release"] is injected into Context.config.
+
+    Monkeypatches the module's global-config path to a temp file and captures the
+    ``config`` kwarg the entrypoint passes to Context — asserts the resolved
+    protected set is {"release"} (D-05 replace flows through the entrypoint).
+    """
+    module = _load_entrypoint_module()
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text('[git]\nprotected_branches = ["release"]\n', encoding="utf-8")
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", cfg_path)
+
+    captured: dict[str, object] = {}
+    real_context = module.Context
+
+    def _capture_context(*, cwd, _resolver, config):
+        captured["config"] = config
+        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+
+    monkeypatch.setattr(module, "Context", _capture_context)
+    payload = {"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/x"}
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    module.main()
+
+    cfg = captured["config"]
+    assert cfg.protected_branches == frozenset({"release"})
+
+
+def test_entrypoint_absent_global_injects_builtin(monkeypatch, tmp_path) -> None:
+    """No global config FILE -> the injected config equals builtin_config() (D-08)."""
+    module = _load_entrypoint_module()
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "does-not-exist.toml")
+
+    captured: dict[str, object] = {}
+    real_context = module.Context
+
+    def _capture_context(*, cwd, _resolver, config):
+        captured["config"] = config
+        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+
+    monkeypatch.setattr(module, "Context", _capture_context)
+    payload = {"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/x"}
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    module.main()
+
+    from safe_read_hook.config import builtin_config
+
+    assert captured["config"] == builtin_config()
+
+
+def test_entrypoint_absent_protected_key_keeps_builtin(monkeypatch, tmp_path) -> None:
+    """CARDINAL E2E: a global with only gated=["push"] keeps protected master/main.
+
+    The absent-protected-key fallback wired through the entrypoint — a global that
+    customizes only the gated set must NOT empty the protected set.
+    """
+    module = _load_entrypoint_module()
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text('[git]\ngated_subcommands = ["push"]\n', encoding="utf-8")
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", cfg_path)
+
+    captured: dict[str, object] = {}
+    real_context = module.Context
+
+    def _capture_context(*, cwd, _resolver, config):
+        captured["config"] = config
+        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+
+    monkeypatch.setattr(module, "Context", _capture_context)
+    payload = {"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/x"}
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    module.main()
+
+    cfg = captured["config"]
+    assert cfg.protected_branches == frozenset({"master", "main"})
+    assert cfg.gated_subcommands == frozenset({"push"})
+
+
+def test_entrypoint_malformed_global_degrades_to_builtin(monkeypatch, tmp_path) -> None:
+    """A malformed global config degrades to builtin_config() — never crashes."""
+    module = _load_entrypoint_module()
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text("this is not = valid = toml [[[", encoding="utf-8")
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", cfg_path)
+
+    captured: dict[str, object] = {}
+    real_context = module.Context
+
+    def _capture_context(*, cwd, _resolver, config):
+        captured["config"] = config
+        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+
+    monkeypatch.setattr(module, "Context", _capture_context)
+    payload = {"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/x"}
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    module.main()  # must not raise
+
+    from safe_read_hook.config import builtin_config
+
+    assert captured["config"] == builtin_config()
 
 
 def test_process_sub_payload_emits_nothing() -> None:
