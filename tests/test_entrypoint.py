@@ -438,20 +438,20 @@ def test_entrypoint_uses_resolve_config(monkeypatch, tmp_path) -> None:
     calls it exactly once with (global_path, project_path) — the single
     orchestrated call replacing the inline per-layer handling.
     """
-    import safe_read_hook.config as config_mod
-
     module = _load_entrypoint_module()
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
 
     calls: list[tuple] = []
-    real_resolve = config_mod.resolve_config
+    real_resolve = module.resolve_config
 
     def _spy_resolve(global_path, project_path, *args, **kwargs):
         calls.append((global_path, project_path))
         return real_resolve(global_path, project_path, *args, **kwargs)
 
-    monkeypatch.setattr(config_mod, "resolve_config", _spy_resolve)
+    # The entrypoint does `from ...config import resolve_config`, so the bound name
+    # to patch lives in the entrypoint module's namespace (its call site).
+    monkeypatch.setattr(module, "resolve_config", _spy_resolve)
 
     _capture_config_module(module, monkeypatch)
 
@@ -471,7 +471,9 @@ def test_entrypoint_malformed_global_e2e_does_not_crash(tmp_path) -> None:
     """
     cfg_dir = tmp_path / ".config" / "claude-safe-hook"
     cfg_dir.mkdir(parents=True)
-    (cfg_dir / "config.toml").write_text("this is not = valid = toml [[[", encoding="utf-8")
+    (cfg_dir / "config.toml").write_text(
+        "this is not = valid = toml [[[", encoding="utf-8"
+    )
 
     import os
 
@@ -555,7 +557,9 @@ def test_entrypoint_malformed_project_keeps_global(monkeypatch, tmp_path) -> Non
     """
     module = _load_entrypoint_module()
     global_path = tmp_path / "global.toml"
-    global_path.write_text('[git]\nprotected_branches = ["release"]\n', encoding="utf-8")
+    global_path.write_text(
+        '[git]\nprotected_branches = ["release"]\n', encoding="utf-8"
+    )
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", global_path)
 
     project_dir = tmp_path / "repo"
