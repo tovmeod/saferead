@@ -17,6 +17,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from .config import ResolvedConfig, builtin_config
+
 
 def _no_branch(_cwd: str | None) -> str | None:
     """Default branch resolver: the Phase 2 seam with no git logic (D-05)."""
@@ -32,11 +34,20 @@ class Context:
         _resolver: Branch resolver, called lazily and memoized per cwd by
             :meth:`branch`. Defaults to :func:`_no_branch` (returns ``None``).
         _branch_cache: Per-cwd memoization store for resolved branch names.
+        config: The resolved protected/gated/disabled sets (Phase 9). Injected
+            once at the entrypoint, read by the git recognizer (``ctx.config.*``)
+            instead of the deleted ``_PROTECTED``/``_GATED`` module constants.
+            Defaulted via :func:`builtin_config` so an un-injected Context
+            degrades to the built-in master/main floor — NOT "no protection"
+            (D-09 fail-closed). LOCKED single-field shape (Plans 02/03 consume
+            ``ctx.config.protected_branches`` / ``.gated_subcommands`` /
+            ``.disabled_recognizers``).
     """
 
     cwd: str | None
     _resolver: Callable[[str | None], str | None] = _no_branch
     _branch_cache: dict[str, str | None] = field(default_factory=dict)
+    config: ResolvedConfig = field(default_factory=builtin_config)
 
     def branch(self, cwd: str | None = None) -> str | None:
         """Return the branch for ``cwd`` (or ``self.cwd``), resolving once per cwd.

@@ -50,11 +50,12 @@ from ..verdict import Verdict
 # token TEXT — a ``-``-leading flag check alone does NOT catch ``git log >/tmp/x``.
 _DISCARD_REDIR = re.compile(r"(?:2>&1|>/dev/null|2>/dev/null|&>>?/dev/null)")
 
-# Hardcoded policy constants (D-04). Phase 9 replaces these with TOML; do NOT
-# pull config forward. Both are defined here even though only Plan 05-02 consumes
-# them (interface-first — 05-02 must not reach back to add them).
-_PROTECTED = frozenset({"master", "main"})
-_GATED = frozenset({"add", "commit", "stash"})
+# The protected-branch and gated-subcommand sets are NO LONGER hardcoded here
+# (Phase 9 / CFG-01). They are config-sourced and read from ``ctx.config``
+# (``ctx.config.protected_branches`` / ``ctx.config.gated_subcommands``) at the
+# gated branch-gate verdict below. The built-in floor (master/main +
+# add/commit/stash) now lives in ``config.builtin_config`` and is the default a
+# Context carries when no config is injected.
 
 # General read-only subcommands, admitted in BARE/positional form only. Any
 # ``-``-leading option on these abstains (allowlist polarity) — this closes
@@ -172,19 +173,21 @@ def recognize_git(segment: str, ctx: Context) -> Verdict | None:
     if _is_read_only(sub, args):
         return Verdict("allow", "read-only git", "git")
 
-    # GATED branch-gate verdict (D-01/D-02). _GATED = add/commit/bare stash (NOT
-    # push, NOT stash push — those abstain above/fall through to None) are
-    # state-mutating; gate them on the working branch. This is the ONLY place
-    # recognize_git resolves the branch (Pitfall 1 — never on the read-only
-    # path above). The probe is lazy + per-cwd memoized inside ctx.branch.
-    if sub in _GATED:
+    # GATED branch-gate verdict (D-01/D-02). The gated set = add/commit/bare
+    # stash (NOT push, NOT stash push — those abstain above/fall through to None)
+    # are state-mutating; gate them on the working branch. Both the gated set and
+    # the protected set are read from ``ctx.config`` (Phase 9 / CFG-01), replacing
+    # the deleted module constants. This is the ONLY place recognize_git resolves
+    # the branch (Pitfall 1 — never on the read-only path above). The probe is
+    # lazy + per-cwd memoized inside ctx.branch.
+    if sub in ctx.config.gated_subcommands:
         branch = ctx.branch(effective_cwd)
         if branch is None:
             # Detached HEAD / not-a-repo / probe error -> ASK, not abstain
             # (D-02; Pitfall 4). Treat unknown like protected — fail-safe
             # visible. Diverges from the seed's abstain.
             return Verdict("ask", "unresolved branch — approve manually", "git")
-        if branch in _PROTECTED:
+        if branch in ctx.config.protected_branches:
             return Verdict("ask", f"protected branch '{branch}'", "git")
         return Verdict("allow", f"gated git op on '{branch}'", "git")
 
