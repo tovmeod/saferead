@@ -158,13 +158,23 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
     """Narrow an already-resolved ``base`` with an untrusted PROJECT layer (D-04).
 
     The merge is narrow-only BY CONSTRUCTION — there is no remove/replace/enable
-    operation. All three fields combine additively:
+    operation. The INVARIANT every merged dimension must satisfy: a project ADD to
+    the set may only move verdicts toward ask/abstain, NEVER toward allow.
 
-    * ``protected_branches`` = ``base ∪ project`` (project can only ADD branches).
-    * ``gated_subcommands``  = ``base ∪ project`` (project can only ADD subcommands).
-    * ``disabled_recognizers`` = ``base ∪ project`` (project can only ADD disabled
-      tags; there is no ``enabled`` key, so a project can never re-enable a tag the
-      base disabled).
+    * ``protected_branches`` = ``base ∪ project`` (project ADD → more ASK; safe).
+    * ``disabled_recognizers`` = ``base ∪ project`` (project ADD → more abstain;
+      there is no ``enabled`` key, so a project can never re-enable a tag the base
+      disabled; safe).
+    * ``gated_subcommands`` = ``base`` ONLY — the project does NOT contribute.
+      Unlike the other two, the gated path is NOT pure-ASK: ``recognize_git`` has
+      an ALLOW arm for a gated subcommand on a NON-protected branch (git.py). So a
+      project ADD to the gated set WIDENS the allow-set for state-mutating git ops
+      on feature branches — a cardinal false-allow (CR-01). A union can only grow
+      the set; it can never narrow gated trust toward abstain. The trusted GLOBAL
+      layer may still set gated via :func:`load_layer`; the untrusted PROJECT layer
+      may not. This OVERRIDES locked decision D-04 ("gated by union") and ROADMAP
+      criterion-3 ("project can add gated subcommands"): the cardinal "never widen
+      the allow-set" constraint outranks both.
 
     POLARITY (the opposite of :func:`load_layer`): an ABSENT project key (``None``
     in the :class:`RawLayer`) is the additive identity — the EMPTY set — so the
@@ -182,11 +192,6 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
         if project.protected_branches is not None
         else frozenset()
     )
-    project_gated = (
-        project.gated_subcommands
-        if project.gated_subcommands is not None
-        else frozenset()
-    )
     project_disabled = (
         project.disabled_recognizers
         if project.disabled_recognizers is not None
@@ -194,7 +199,11 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
     )
     return ResolvedConfig(
         protected_branches=base.protected_branches | project_protected,
-        gated_subcommands=base.gated_subcommands | project_gated,
+        # gated_subcommands: base ONLY — the untrusted project must NOT contribute
+        # (a project ADD widens the gated ALLOW arm on non-protected branches:
+        # cardinal false-allow CR-01). See the docstring for the D-04/criterion-3
+        # override rationale.
+        gated_subcommands=base.gated_subcommands,
         disabled_recognizers=base.disabled_recognizers | project_disabled,
     )
 

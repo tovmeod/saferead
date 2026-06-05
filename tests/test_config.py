@@ -181,8 +181,15 @@ def test_merge_unions_protected_branches() -> None:
     assert result.protected_branches == frozenset({"master", "main", "release"})
 
 
-def test_merge_unions_gated_subcommands() -> None:
-    """merge unions gated_subcommands onto the base set."""
+def test_merge_drops_untrusted_project_gated() -> None:
+    """merge IGNORES the untrusted project's gated_subcommands (CR-01).
+
+    The gated path is NOT pure-ASK: ``recognize_git`` ALLOWs a gated subcommand on
+    a non-protected branch, so a project ADD to the gated set would WIDEN the
+    allow-set for state-mutating git ops (a cardinal false-allow). The project's
+    ``gated_subcommands`` must therefore have ZERO effect — the merged set equals
+    the trusted base exactly, with ``push`` NOT present.
+    """
     base = _base()
     project = RawLayer(
         protected_branches=None,
@@ -190,7 +197,8 @@ def test_merge_unions_gated_subcommands() -> None:
         disabled_recognizers=None,
     )
     result = merge(base, project)
-    assert result.gated_subcommands == base.gated_subcommands | {"push"}
+    assert result.gated_subcommands == base.gated_subcommands
+    assert "push" not in result.gated_subcommands
 
 
 def test_merge_adds_disabled_recognizers() -> None:

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from safe_read_hook.config import ResolvedConfig
+from safe_read_hook.config import RawLayer, ResolvedConfig, builtin_config, merge
 from safe_read_hook.context import Context
 from safe_read_hook.engine import fold
 from safe_read_hook.recognizers import REGISTRY
@@ -523,6 +523,28 @@ def test_git_config_injection_subcommand_not_gated_abstains() -> None:
         _resolver=_fail_if_called,
     )
     assert recognize_git("git commit -m x", ctx) is None
+
+
+def test_git_gated_hostile_project_push_abstains_on_feature() -> None:
+    """END-TO-END (CR-01): a hostile project ``gated=["push"]`` cannot auto-allow.
+
+    Threads the untrusted layer THROUGH ``merge`` (not a hand-built config — that
+    would tautologically pass even with the bug present): the merged config must
+    drop the project's gated ``push``. ``recognize_git`` on ``git push origin
+    feature`` then finds ``push`` ∉ gated and falls through to ``None`` (abstain),
+    NEVER an auto-allow of a state-mutating command. Restore ``| project_gated`` in
+    merge() and this goes RED — that is the cardinal hole this pins.
+    """
+    hostile = RawLayer(
+        protected_branches=None,
+        gated_subcommands=frozenset({"push"}),
+        disabled_recognizers=None,
+    )
+    resolved = merge(builtin_config(), hostile)
+    assert "push" not in resolved.gated_subcommands
+    ctx = Context(cwd="/x", config=resolved, _resolver=lambda _c: "feature")
+    verdict = recognize_git("git push origin feature", ctx)
+    assert verdict is None  # not allow, not ask — abstains (direct is-None)
 
 
 def test_git_default_config_is_builtin_floor() -> None:
