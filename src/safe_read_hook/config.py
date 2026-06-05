@@ -10,6 +10,12 @@ The built-in floor (``builtin_config``) is the proven-safe default a missing or
 broken config degrades toward (D-08 case 1 / D-09): protected ``master``/``main``,
 gated ``add``/``commit``/``stash``, nothing disabled.
 
+:func:`resolve_config` (Plan 03) is the never-raising orchestrator that applies
+the full D-08 three-case + D-09 per-layer fail-closed matrix across both layers,
+falling toward the built-in floor (D-10 safe defaults) and never crashing the
+hook (CORE-06). The entrypoint owns the I/O (path/env resolution) and calls this
+single total function.
+
 CARDINAL absent-vs-empty distinction (D-05/D-07 boundary) — the whole point of
 this loader:
 
@@ -34,6 +40,7 @@ project layer's RAW present/absent keys rather than this fully-resolved view:
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -223,3 +230,68 @@ def load_layer(path: Path) -> ResolvedConfig:
             else frozenset()
         ),
     )
+
+
+def resolve_config(
+    global_path: Path,
+    project_path: Path | None,
+    log: Callable[[str], None] = lambda _msg: None,
+) -> ResolvedConfig:
+    """Resolve the effective config across both layers; NEVER raises (CFG-04).
+
+    The total never-raising orchestrator of the D-08 three-case distinction and
+    the D-09 per-layer fail-closed matrix. Any error anywhere degrades toward the
+    built-in floor (D-10 safe defaults) — a malformed/unreadable config never
+    crashes the hook (CORE-06) and never silently WIDENS trust below built-in.
+
+    Resolution ladder (most→least trusted):
+
+    1. **Base (global layer).**
+       * D-08 case 1 — ``global_path`` does not exist → :func:`builtin_config`.
+       * Present → :func:`load_layer` (a present global REPLACES built-in, D-05;
+         an absent key inside it falls back to that key's built-in value, Plan 01
+         — NOT a malformed signal, D-07).
+       * D-09 malformed/unreadable global → log + DROP the global layer → fall
+         back to :func:`builtin_config`. Resolution CONTINUES to the project
+         layer: a valid project still narrows on top of the built-in floor.
+
+    2. **Narrow (project layer).**
+       * D-03 / D-08 case 2 — ``project_path`` is ``None`` (CLAUDE_PROJECT_DIR
+         skipped) or the file does not exist → return ``base`` unchanged.
+       * Present → :func:`parse_layer` (RAW present/absent keys, D-07 polarity) +
+         :func:`merge` (narrow-only union/add, CFG-02/CFG-03).
+       * D-09 malformed/unreadable project → log + DROP the project layer →
+         return ``base`` (per-layer blast radius; the project layer can only
+         narrow, so dropping it never widens trust below ``base``). The dropped
+         layer's ``disabled`` list goes with it — a broken layer never ENABLES a
+         recognizer the trusted base disabled (D-09 recognizer dimension).
+
+    3. **Outer backstop.** Any unexpected error in the whole orchestration falls
+       to :func:`builtin_config` rather than propagating (CORE-06 total function).
+
+    ``log`` is injected (default no-op) so this function never touches stdout and
+    has no import dependency on the entrypoint; the entrypoint passes its own
+    best-effort ``log``. Pure aside from the two file reads (both guarded).
+    """
+    try:
+        # 1. Base: the trusted global/built-in layer (D-08 case 1 / D-09 global).
+        try:
+            base = load_layer(global_path) if global_path.exists() else builtin_config()
+        except Exception:
+            log("global config load failed; using built-in floor (D-09)")
+            base = builtin_config()
+
+        # 2. Narrow: the untrusted project layer (D-08 case 2 / D-03 / D-09 project).
+        if project_path is None:
+            return base  # CLAUDE_PROJECT_DIR skipped (D-03) -> base only.
+        try:
+            if not project_path.exists():
+                return base  # absent project FILE -> base only (D-08 case 2).
+            return merge(base, parse_layer(project_path))
+        except Exception:
+            log("project config load failed; keeping global/built-in base (D-09)")
+            return base
+    except Exception:
+        # 3. Total-function backstop: never propagate (CORE-06).
+        log("config resolution failed; using built-in floor (D-09/CORE-06)")
+        return builtin_config()
