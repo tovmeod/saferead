@@ -48,12 +48,44 @@ sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != _HERE]
 # (emit nothing, exit 0) rather than a traceback — the CORE-06 never-crash
 # contract must hold for import failures too, not just runtime errors in main().
 try:
+    from safe_read_hook.config import (  # noqa: E402
+        ResolvedConfig,
+        builtin_config,
+        load_layer,
+    )
     from safe_read_hook.context import Context  # noqa: E402
     from safe_read_hook.engine import fold  # noqa: E402
     from safe_read_hook.tokenizer import tokenize  # noqa: E402
 except Exception:
     log("uncaught exception (core import failed):\n" + traceback.format_exc())
     sys.exit(0)
+
+
+# The trusted GLOBAL config (D-01). Resolved once per invocation in _load_config;
+# a module constant so tests can repoint it at a temp file (mirrors the patchable
+# resolver seam). NOT a cached config object — only the path is module-level.
+_GLOBAL_CONFIG_PATH = Path.home() / ".config" / "claude-safe-hook" / "config.toml"
+
+
+def _load_config() -> ResolvedConfig:
+    """Resolve the global config once, fail-closed to the built-in floor.
+
+    Absent FILE -> built-in floor (D-08 case 1 / D-05: built-in applies only when
+    no global exists). Present -> the resolved single layer. Any parse/value error
+    is logged best-effort and degrades to the built-in floor (D-09 never-crash;
+    the full multi-layer fail-closed matrix is hardened in Plan 03). Mirrors the
+    ``_resolve_branch`` try/except -> safe-default shape.
+    """
+    try:
+        if not _GLOBAL_CONFIG_PATH.exists():
+            return builtin_config()
+        return load_layer(_GLOBAL_CONFIG_PATH)
+    except Exception:
+        log(
+            "global config load failed; using built-in floor:\n"
+            + traceback.format_exc()
+        )
+        return builtin_config()
 
 
 def _resolve_branch(cwd: str | None) -> str | None:
@@ -94,7 +126,11 @@ def main() -> None:
         command = payload.get("tool_input", {}).get("command", "")
         if not isinstance(command, str) or not command:
             return
-        ctx = Context(cwd=payload.get("cwd"), _resolver=_resolve_branch)
+        ctx = Context(
+            cwd=payload.get("cwd"),
+            _resolver=_resolve_branch,
+            config=_load_config(),
+        )
         result = tokenize(command)
         if result.abstain_reason is not None:
             return  # structural/over-length/allowlist trigger — abstain (D-15)

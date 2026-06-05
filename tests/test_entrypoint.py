@@ -154,7 +154,11 @@ def test_entrypoint_injects_resolved_global_config(monkeypatch, tmp_path) -> Non
         return real_context(cwd=cwd, _resolver=_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
-    payload = {"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/x"}
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+        "cwd": "/x",
+    }
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
     module.main()
 
@@ -175,7 +179,11 @@ def test_entrypoint_absent_global_injects_builtin(monkeypatch, tmp_path) -> None
         return real_context(cwd=cwd, _resolver=_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
-    payload = {"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/x"}
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+        "cwd": "/x",
+    }
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
     module.main()
 
@@ -203,7 +211,11 @@ def test_entrypoint_absent_protected_key_keeps_builtin(monkeypatch, tmp_path) ->
         return real_context(cwd=cwd, _resolver=_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
-    payload = {"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/x"}
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+        "cwd": "/x",
+    }
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
     module.main()
 
@@ -227,7 +239,11 @@ def test_entrypoint_malformed_global_degrades_to_builtin(monkeypatch, tmp_path) 
         return real_context(cwd=cwd, _resolver=_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
-    payload = {"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/x"}
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+        "cwd": "/x",
+    }
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
     module.main()  # must not raise
 
