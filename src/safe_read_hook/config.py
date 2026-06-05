@@ -147,6 +147,51 @@ def parse_layer(path: Path) -> RawLayer:
     )
 
 
+def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
+    """Narrow an already-resolved ``base`` with an untrusted PROJECT layer (D-04).
+
+    The merge is narrow-only BY CONSTRUCTION — there is no remove/replace/enable
+    operation. All three fields combine additively:
+
+    * ``protected_branches`` = ``base ∪ project`` (project can only ADD branches).
+    * ``gated_subcommands``  = ``base ∪ project`` (project can only ADD subcommands).
+    * ``disabled_recognizers`` = ``base ∪ project`` (project can only ADD disabled
+      tags; there is no ``enabled`` key, so a project can never re-enable a tag the
+      base disabled).
+
+    POLARITY (the opposite of :func:`load_layer`): an ABSENT project key (``None``
+    in the :class:`RawLayer`) is the additive identity — the EMPTY set — so the
+    base value passes through unchanged (D-07). This differs deliberately from the
+    single-layer built-in fallback, because the project layer narrows an
+    already-resolved base rather than standing alone.
+
+    criterion-3 (CFG-03) follows directly: every member of ``base`` survives ANY
+    project layer (union/add can only retain or add), so a hostile project value
+    that "tries" to drop ``main`` / un-gate ``commit`` / re-enable a recognizer has
+    ZERO effect. Pure (no I/O).
+    """
+    project_protected = (
+        project.protected_branches
+        if project.protected_branches is not None
+        else frozenset()
+    )
+    project_gated = (
+        project.gated_subcommands
+        if project.gated_subcommands is not None
+        else frozenset()
+    )
+    project_disabled = (
+        project.disabled_recognizers
+        if project.disabled_recognizers is not None
+        else frozenset()
+    )
+    return ResolvedConfig(
+        protected_branches=base.protected_branches | project_protected,
+        gated_subcommands=base.gated_subcommands | project_gated,
+        disabled_recognizers=base.disabled_recognizers | project_disabled,
+    )
+
+
 def load_layer(path: Path) -> ResolvedConfig:
     """Load + resolve a SINGLE global/standalone TOML layer to a ResolvedConfig.
 
