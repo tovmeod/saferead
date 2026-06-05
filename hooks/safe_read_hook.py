@@ -52,6 +52,8 @@ try:
         ResolvedConfig,
         builtin_config,
         load_layer,
+        merge,
+        parse_layer,
     )
     from safe_read_hook.context import Context  # noqa: E402
     from safe_read_hook.engine import fold  # noqa: E402
@@ -67,14 +69,30 @@ except Exception:
 _GLOBAL_CONFIG_PATH = Path.home() / ".config" / "claude-safe-hook" / "config.toml"
 
 
-def _load_config() -> ResolvedConfig:
-    """Resolve the global config once, fail-closed to the built-in floor.
+def _project_config_path() -> Path | None:
+    """Return the untrusted PROJECT config path, or None when it should be skipped.
+
+    Resolves ``$CLAUDE_PROJECT_DIR/.claude/safe-read-hook.toml`` (D-02 — a
+    standalone dotfile, NOT a ``pyproject.toml [tool.*]`` section). When
+    ``CLAUDE_PROJECT_DIR`` is unset OR empty the project layer is SKIPPED ENTIRELY
+    (returns None) — the planner-chosen D-03 behavior. Skipping is cardinal-safe:
+    the project layer can only NARROW (union/add), so omitting it never widens
+    trust below the global/built-in base. The unset/empty short-circuit happens
+    BEFORE any path is constructed so nothing is read in that case.
+    """
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not project_dir:
+        return None
+    return Path(project_dir) / ".claude" / "safe-read-hook.toml"
+
+
+def _load_global_config() -> ResolvedConfig:
+    """Resolve the trusted GLOBAL/built-in base, fail-closed to the built-in floor.
 
     Absent FILE -> built-in floor (D-08 case 1 / D-05: built-in applies only when
     no global exists). Present -> the resolved single layer. Any parse/value error
-    is logged best-effort and degrades to the built-in floor (D-09 never-crash;
-    the full multi-layer fail-closed matrix is hardened in Plan 03). Mirrors the
-    ``_resolve_branch`` try/except -> safe-default shape.
+    is logged best-effort and degrades to the built-in floor (D-09 never-crash).
+    Mirrors the ``_resolve_branch`` try/except -> safe-default shape.
     """
     try:
         if not _GLOBAL_CONFIG_PATH.exists():
@@ -86,6 +104,38 @@ def _load_config() -> ResolvedConfig:
             + traceback.format_exc()
         )
         return builtin_config()
+
+
+def _load_config() -> ResolvedConfig:
+    """Resolve the effective config: the global/built-in base narrowed by the project.
+
+    1. Resolve the trusted global/built-in ``base`` (:func:`_load_global_config`).
+    2. If a project config path is in scope (CLAUDE_PROJECT_DIR set, D-03) AND the
+       file exists, read its RAW present/absent keys (``parse_layer`` — absent
+       project key = additive-identity-empty, D-07) and ``merge`` narrow-only onto
+       the base (union protected/gated, add disabled — project can only NARROW,
+       CFG-02/CFG-03).
+    3. Absent project FILE -> the base unchanged (D-08 case 2).
+
+    The project load+merge has its OWN try/except (per-layer blast radius, D-09):
+    a malformed/unreadable project layer is DROPPED and the GOOD ``base`` is kept
+    (NOT the built-in floor) — safe because the project layer could only narrow.
+    The full malformed matrix is Plan 03; this is the per-layer seam.
+    """
+    base = _load_global_config()
+    project_path = _project_config_path()
+    if project_path is None:
+        return base  # CLAUDE_PROJECT_DIR unset/empty -> skip the project layer (D-03)
+    try:
+        if not project_path.exists():
+            return base  # absent project FILE -> base only (D-08 case 2)
+        return merge(base, parse_layer(project_path))
+    except Exception:
+        log(
+            "project config load failed; keeping global/built-in base:\n"
+            + traceback.format_exc()
+        )
+        return base
 
 
 def _resolve_branch(cwd: str | None) -> str | None:

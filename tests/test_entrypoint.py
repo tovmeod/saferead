@@ -279,7 +279,7 @@ def _capture_config_module(module, monkeypatch, payload_command: str = "git stat
     return captured["config"]
 
 
-def test_entrypoint_project_dir_unset_skips_project_layer(monkeypatch, tmp_path) -> None:
+def test_entrypoint_project_dir_unset_skips_layer(monkeypatch, tmp_path) -> None:
     """CLAUDE_PROJECT_DIR unset -> the project layer is SKIPPED, no file read (D-03).
 
     Points the project-layer reader (parse_layer) at a spy and asserts it is
@@ -307,7 +307,7 @@ def test_entrypoint_project_dir_unset_skips_project_layer(monkeypatch, tmp_path)
     assert cfg == builtin_config()
 
 
-def test_entrypoint_project_dir_empty_skips_project_layer(monkeypatch, tmp_path) -> None:
+def test_entrypoint_project_dir_empty_skips_layer(monkeypatch, tmp_path) -> None:
     """An EMPTY CLAUDE_PROJECT_DIR is treated like unset -> project layer skipped."""
     module = _load_entrypoint_module()
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
@@ -328,7 +328,7 @@ def test_entrypoint_project_dir_empty_skips_project_layer(monkeypatch, tmp_path)
 
 
 def test_entrypoint_project_layer_narrows_legitimately(monkeypatch, tmp_path) -> None:
-    """A project layer that ADDS protected=["release"] + disabled=["pytest"] takes effect."""
+    """A project layer adding protected=["release"] + disabled=["pytest"] applies."""
     module = _load_entrypoint_module()
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
 
@@ -391,7 +391,7 @@ def test_entrypoint_criterion3_project_cannot_escalate(monkeypatch, tmp_path) ->
     assert hostile_cfg.disabled_recognizers == frozenset({"sed"})
 
 
-def test_entrypoint_malformed_project_drops_to_global_base(monkeypatch, tmp_path) -> None:
+def test_entrypoint_malformed_project_drops_to_base(monkeypatch, tmp_path) -> None:
     """A malformed PROJECT layer drops to the GOOD GLOBAL base (per-layer blast radius).
 
     The global resolved fine (protected=["release"]); only the project layer is
@@ -399,7 +399,9 @@ def test_entrypoint_malformed_project_drops_to_global_base(monkeypatch, tmp_path
     """
     module = _load_entrypoint_module()
     global_path = tmp_path / "global.toml"
-    global_path.write_text('[git]\nprotected_branches = ["release"]\n', encoding="utf-8")
+    global_path.write_text(
+        '[git]\nprotected_branches = ["release"]\n', encoding="utf-8"
+    )
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", global_path)
 
     project_dir = tmp_path / "repo"
