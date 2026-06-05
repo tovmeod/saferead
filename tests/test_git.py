@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 
+from safe_read_hook.config import ResolvedConfig
 from safe_read_hook.context import Context
 from safe_read_hook.engine import fold
 from safe_read_hook.recognizers import REGISTRY, recognize_reader
@@ -463,6 +464,77 @@ def test_git_gated_first_one_discarded_probe() -> None:
 )
 def test_git_non_git_abstains(segment: str, ctx: Context) -> None:
     assert recognize_git(segment, ctx) is None
+
+
+# --- config injection: git.py reads ctx.config, not the module constants ---
+#
+# Proves the gated branch-gate verdict consults ctx.config.protected_branches /
+# ctx.config.gated_subcommands rather than the (deleted) _PROTECTED/_GATED
+# constants. Naming includes "config_injection" so the documented -k filter
+# selects these.
+
+
+def _cfg(protected: set[str], gated: set[str]) -> ResolvedConfig:
+    return ResolvedConfig(
+        protected_branches=frozenset(protected),
+        gated_subcommands=frozenset(gated),
+        disabled_recognizers=frozenset(),
+    )
+
+
+def test_git_config_injection_main_not_protected_allows() -> None:
+    """Inject protected={release}: a gated commit on 'main' ALLOWs (main unprotected).
+
+    Cardinal proof the verdict reads ctx.config.protected_branches — with the
+    deleted _PROTECTED constant this would have ASKed.
+    """
+    ctx = Context(
+        cwd="/x",
+        config=_cfg({"release"}, {"commit"}),
+        _resolver=lambda _c: "main",
+    )
+    verdict = recognize_git("git commit -m x", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "git"
+
+
+def test_git_config_injection_release_protected_asks() -> None:
+    """Inject protected={release} + resolver 'release': a gated commit ASKs."""
+    ctx = Context(
+        cwd="/x",
+        config=_cfg({"release"}, {"commit"}),
+        _resolver=lambda _c: "release",
+    )
+    verdict = recognize_git("git commit -m x", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+
+
+def test_git_config_injection_subcommand_not_gated_abstains() -> None:
+    """Inject gated={push} (not commit): a bare 'git commit' falls through to None.
+
+    Proves the gate membership test reads ctx.config.gated_subcommands — with
+    'commit' absent from the injected gated set the recognizer no longer gates it.
+    """
+    ctx = Context(
+        cwd="/x",
+        config=_cfg({"main"}, {"push"}),
+        _resolver=_fail_if_called,
+    )
+    assert recognize_git("git commit -m x", ctx) is None
+
+
+def test_git_default_config_is_builtin_floor() -> None:
+    """An un-injected Context(cwd=...) defaults to the built-in floor (D-09).
+
+    Without config injection a gated commit on 'main' still ASKs — the default
+    must be the master/main floor, NOT 'no protection'.
+    """
+    ctx = Context(cwd="/x", _resolver=lambda _c: "main")
+    verdict = recognize_git("git commit -m x", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
 
 
 # --- REGISTRY wiring (Task 2) ---------------------------------------------
