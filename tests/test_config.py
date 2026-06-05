@@ -20,6 +20,7 @@ from safe_read_hook.config import (
     builtin_config,
     load_layer,
     merge,
+    resolve_config,
 )
 
 
@@ -253,3 +254,109 @@ def test_merge_never_shrinks_any_set() -> None:
     assert base.gated_subcommands <= result.gated_subcommands
     assert base.disabled_recognizers <= result.disabled_recognizers
     assert result == base
+
+
+# --- Plan 03: resolve_config never-raising D-08/D-09 orchestrator (CFG-04) ---
+
+
+def _write_named(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_resolve_config_absent_both_is_builtin(tmp_path: Path) -> None:
+    """D-08 case 1+2: absent global FILE + absent project FILE -> builtin_config()."""
+    result = resolve_config(
+        tmp_path / "no-global.toml",
+        tmp_path / "no-project.toml",
+    )
+    assert result == builtin_config()
+
+
+def test_resolve_config_absent_project_is_none(tmp_path: Path) -> None:
+    """A None project_path (CLAUDE_PROJECT_DIR skipped) -> resolved base unchanged."""
+    global_path = _write_named(
+        tmp_path, "global.toml", '[git]\nprotected_branches = ["release"]\n'
+    )
+    result = resolve_config(global_path, None)
+    assert result.protected_branches == frozenset({"release"})
+
+
+def test_resolve_config_malformed_global_falls_to_builtin(tmp_path: Path) -> None:
+    """D-09/D-10: a malformed global degrades to the built-in floor; never raises.
+
+    Safe defaults (D-10): master/main + add/commit/stash present — the built-in
+    floor restored, NOT "treat all branches as protected".
+    """
+    global_path = _write_named(tmp_path, "global.toml", "this is not = toml [[[")
+    result = resolve_config(global_path, None)  # must not raise
+    assert result == builtin_config()
+    assert result.protected_branches == frozenset({"master", "main"})
+    assert result.gated_subcommands == frozenset({"add", "commit", "stash"})
+
+
+def test_resolve_config_malformed_project_keeps_global(tmp_path: Path) -> None:
+    """D-09 per-layer blast radius: a malformed project drops, the GOOD global survives.
+
+    The trusted global protecting only "release" survives; the malformed project
+    is dropped (not crashed). Proves the project-layer blast radius.
+    """
+    global_path = _write_named(
+        tmp_path, "global.toml", '[git]\nprotected_branches = ["release"]\n'
+    )
+    project_path = _write_named(tmp_path, "project.toml", "broken = = = [[[")
+    result = resolve_config(global_path, project_path)  # must not raise
+    assert result.protected_branches == frozenset({"release"})
+
+
+def test_resolve_config_malformed_global_still_narrows_with_project(
+    tmp_path: Path,
+) -> None:
+    """D-09: a malformed GLOBAL falls to built-in, a VALID project STILL narrows on top.
+
+    The global try/except must fall to builtin_config() and CONTINUE to the
+    project merge (not early-return) — built-in {master,main} UNION project
+    {release}.
+    """
+    global_path = _write_named(tmp_path, "global.toml", "broken [[[ not toml")
+    project_path = _write_named(
+        tmp_path, "project.toml", '[git]\nprotected_branches = ["release"]\n'
+    )
+    result = resolve_config(global_path, project_path)
+    assert result.protected_branches == frozenset({"master", "main", "release"})
+
+
+def test_resolve_config_malformed_project_never_enables_disabled(
+    tmp_path: Path,
+) -> None:
+    """A broken project that "tries" to re-enable a globally-disabled recognizer fails.
+
+    The global disables "pytest"; the malformed project is dropped WITH its
+    disabled list, so "pytest" stays disabled (a broken layer never enables a
+    trusted-disabled recognizer — D-09 recognizer dimension).
+    """
+    global_path = _write_named(
+        tmp_path, "global.toml", '[recognizers]\ndisabled = ["pytest"]\n'
+    )
+    project_path = _write_named(tmp_path, "project.toml", "garbage = = [[[")
+    result = resolve_config(global_path, project_path)
+    assert "pytest" in result.disabled_recognizers
+
+
+def test_resolve_config_absent_git_table_not_malformed(tmp_path: Path) -> None:
+    """D-07: an absent [git] table in an OTHERWISE-VALID global is NOT malformed.
+
+    It resolves WITHOUT falling back to built-in via the fail-closed path — the
+    absent-protected-key built-in fallback (Plan 01) holds, so protected stays
+    master/main and the config is NOT dropped as if broken.
+    """
+    global_path = _write_named(
+        tmp_path, "global.toml", '[recognizers]\ndisabled = ["sed"]\n'
+    )
+    result = resolve_config(global_path, None)
+    # Absent [git] -> built-in protected/gated (Plan 01 fallback), NOT a drop.
+    assert result.protected_branches == frozenset({"master", "main"})
+    assert result.gated_subcommands == frozenset({"add", "commit", "stash"})
+    # And the valid [recognizers] table was honored (proves it wasn't dropped).
+    assert result.disabled_recognizers == frozenset({"sed"})
