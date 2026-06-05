@@ -14,7 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from safe_read_hook.config import ResolvedConfig, builtin_config, load_layer
+from safe_read_hook.config import (
+    RawLayer,
+    ResolvedConfig,
+    builtin_config,
+    load_layer,
+    merge,
+)
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -148,3 +154,102 @@ def test_load_layer_uses_binary_handle(tmp_path: Path) -> None:
     path = _write(tmp_path, '[git]\nprotected_branches = ["main"]\n')
     cfg = load_layer(path)  # would raise TypeError if opened in text mode
     assert cfg.protected_branches == frozenset({"main"})
+
+
+# --- Plan 02: narrow-only merge (CFG-02 / CFG-03) -------------------------
+
+
+def _base() -> ResolvedConfig:
+    """A representative resolved base: protected main, gated commit, disabled sed."""
+    return ResolvedConfig(
+        protected_branches=frozenset({"master", "main"}),
+        gated_subcommands=frozenset({"add", "commit", "stash"}),
+        disabled_recognizers=frozenset({"sed"}),
+    )
+
+
+def test_merge_unions_protected_branches() -> None:
+    """merge unions protected_branches; base members are RETAINED (D-04)."""
+    base = builtin_config()
+    project = RawLayer(
+        protected_branches=frozenset({"release"}),
+        gated_subcommands=None,
+        disabled_recognizers=None,
+    )
+    result = merge(base, project)
+    assert result.protected_branches == frozenset({"master", "main", "release"})
+
+
+def test_merge_unions_gated_subcommands() -> None:
+    """merge unions gated_subcommands onto the base set."""
+    base = _base()
+    project = RawLayer(
+        protected_branches=None,
+        gated_subcommands=frozenset({"push"}),
+        disabled_recognizers=None,
+    )
+    result = merge(base, project)
+    assert result.gated_subcommands == base.gated_subcommands | {"push"}
+
+
+def test_merge_adds_disabled_recognizers() -> None:
+    """merge adds project disabled tags onto the base disabled set (add-only)."""
+    base = _base()
+    project = RawLayer(
+        protected_branches=None,
+        gated_subcommands=None,
+        disabled_recognizers=frozenset({"pytest"}),
+    )
+    result = merge(base, project)
+    assert result.disabled_recognizers == frozenset({"sed", "pytest"})
+
+
+def test_merge_absent_keys_are_additive_identity() -> None:
+    """A project layer with NO present keys -> result == base exactly (D-07/D-04).
+
+    An absent project key contributes the EMPTY set (additive identity), the
+    OPPOSITE polarity to the global layer's built-in fallback. The criterion-3
+    seed: a project that supplies nothing has ZERO effect.
+    """
+    base = _base()
+    project = RawLayer(
+        protected_branches=None,
+        gated_subcommands=None,
+        disabled_recognizers=None,
+    )
+    result = merge(base, project)
+    assert result == base
+
+
+def test_merge_explicit_empty_sets_are_additive_identity() -> None:
+    """Explicit empty project sets also contribute nothing (union with {} = base)."""
+    base = _base()
+    project = RawLayer(
+        protected_branches=frozenset(),
+        gated_subcommands=frozenset(),
+        disabled_recognizers=frozenset(),
+    )
+    result = merge(base, project)
+    assert result == base
+
+
+def test_merge_never_shrinks_any_set() -> None:
+    """criterion-3 invariant: every base member survives ANY project layer (D-04).
+
+    A hostile project layer cannot remove ``main`` from protected, ``commit``
+    from gated, nor ``sed`` from disabled — the schema has no remove operator,
+    so union/add can only retain or add base members.
+    """
+    base = _base()
+    # A project layer that "tries" to drop everything can only present ADD-only
+    # values; absent keys are empty, so the base is fully retained.
+    project = RawLayer(
+        protected_branches=frozenset(),  # tries (and fails) to "clear" protected
+        gated_subcommands=frozenset(),
+        disabled_recognizers=frozenset(),
+    )
+    result = merge(base, project)
+    assert base.protected_branches <= result.protected_branches
+    assert base.gated_subcommands <= result.gated_subcommands
+    assert base.disabled_recognizers <= result.disabled_recognizers
+    assert result == base
