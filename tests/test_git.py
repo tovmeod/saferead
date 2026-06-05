@@ -23,7 +23,7 @@ import pytest
 from safe_read_hook.config import ResolvedConfig
 from safe_read_hook.context import Context
 from safe_read_hook.engine import fold
-from safe_read_hook.recognizers import REGISTRY, recognize_reader
+from safe_read_hook.recognizers import REGISTRY
 from safe_read_hook.recognizers.git import recognize_git
 from safe_read_hook.verdict import Verdict
 
@@ -540,14 +540,23 @@ def test_git_default_config_is_builtin_floor() -> None:
 # --- REGISTRY wiring (Task 2) ---------------------------------------------
 
 
-def test_git_registered_after_reader() -> None:
-    """recognize_git is in the ordered REGISTRY, after recognize_reader.
+def test_git_registered_after_reader(ctx: Context) -> None:
+    """git is wired into the REGISTRY, with reader still reachable first.
 
-    Reader stays FIRST (the common read path); the git recognizer follows
-    (CORE-04 ordering invariant — one list edit, no engine change).
+    REGISTRY entries are now tag-labeled guard CLOSURES (Plan 02 disable
+    mechanism), so the old element-identity assertion (``recognize_git in
+    REGISTRY``) no longer holds — re-expressed as BEHAVIOR: a reader segment
+    still allows through the registry (reader is reachable, stays first), and a
+    git segment resolves via the git guard (git is wired in). CORE-04 ordering
+    invariant — one list edit, no engine change.
     """
-    assert recognize_git in REGISTRY
-    assert REGISTRY.index(recognize_reader) < REGISTRY.index(recognize_git)
+    assert len(REGISTRY) == 7
+    # Reader is reachable through the registry (the common read path, first).
+    reader_verdict = fold(["cat foo.txt"], ctx)
+    assert reader_verdict is not None and reader_verdict.tag == "reader"
+    # git is wired in: a read-only git segment resolves via the git guard.
+    git_verdict = fold(["git status"], ctx)
+    assert git_verdict is not None and git_verdict.tag == "git"
 
 
 def test_git_config_injection_corpus_consistency(ctx: Context) -> None:
