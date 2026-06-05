@@ -8,7 +8,9 @@ whole vertical slice: stdin -> split -> fold -> envelope.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -475,8 +477,6 @@ def test_entrypoint_malformed_global_e2e_does_not_crash(tmp_path) -> None:
         "this is not = valid = toml [[[", encoding="utf-8"
     )
 
-    import os
-
     env = dict(os.environ)
     env["HOME"] = str(tmp_path)
     env.pop("CLAUDE_PROJECT_DIR", None)  # skip the project layer (D-03)
@@ -530,8 +530,6 @@ def test_entrypoint_malformed_global_asks_on_main(monkeypatch, tmp_path) -> None
         "cwd": "/x",
     }
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
-
-    import io
 
     out = io.StringIO()
     monkeypatch.setattr("sys.stdout", out)
