@@ -31,6 +31,18 @@ def test_builtin_config_is_the_floor() -> None:
     assert cfg.disabled_recognizers == frozenset()
 
 
+def test_resolved_config_locked_field_names() -> None:
+    """ResolvedConfig uses the LOCKED long field names (Plans 02/03 consume them)."""
+    cfg = ResolvedConfig(
+        protected_branches=frozenset({"release"}),
+        gated_subcommands=frozenset({"commit"}),
+        disabled_recognizers=frozenset({"pytest"}),
+    )
+    assert cfg.protected_branches == frozenset({"release"})
+    assert cfg.gated_subcommands == frozenset({"commit"})
+    assert cfg.disabled_recognizers == frozenset({"pytest"})
+
+
 def test_resolved_config_is_frozen() -> None:
     """ResolvedConfig is immutable (frozen+slots value object)."""
     cfg = builtin_config()
@@ -126,9 +138,13 @@ def test_non_str_element_raises(tmp_path: Path) -> None:
         load_layer(path)
 
 
-def test_load_layer_opens_binary(tmp_path: Path) -> None:
-    """A TOML file with a UTF-8 BOM parses (binary handle path, not text)."""
-    path = tmp_path / "config.toml"
-    path.write_bytes(b'\xef\xbb\xbf[git]\nprotected_branches = ["main"]\n')
-    cfg = load_layer(path)
+def test_load_layer_uses_binary_handle(tmp_path: Path) -> None:
+    """load_layer feeds tomllib a BINARY handle (a text handle raises TypeError).
+
+    ``tomllib.load`` requires bytes; a text-mode handle raises TypeError. This
+    pins the PATTERNS gotcha by sentinel: had load_layer opened in text mode, a
+    plain parse below would raise TypeError instead of resolving cleanly.
+    """
+    path = _write(tmp_path, '[git]\nprotected_branches = ["main"]\n')
+    cfg = load_layer(path)  # would raise TypeError if opened in text mode
     assert cfg.protected_branches == frozenset({"main"})
