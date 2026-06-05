@@ -252,6 +252,169 @@ def test_entrypoint_malformed_global_degrades_to_builtin(monkeypatch, tmp_path) 
     assert captured["config"] == builtin_config()
 
 
+# --- Phase 9 Plan 02: project layer load + narrow-only merge --------------
+
+
+def _capture_config_module(module, monkeypatch, payload_command: str = "git status"):
+    """Run module.main() on a Bash payload, returning the captured Context config.
+
+    Monkeypatches Context to capture the injected ``config`` kwarg without
+    changing the entrypoint's fold path (hands back a real Context).
+    """
+    captured: dict[str, object] = {}
+    real_context = module.Context
+
+    def _capture_context(*, cwd, _resolver, config):
+        captured["config"] = config
+        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+
+    monkeypatch.setattr(module, "Context", _capture_context)
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": payload_command},
+        "cwd": "/x",
+    }
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    module.main()
+    return captured["config"]
+
+
+def test_entrypoint_project_dir_unset_skips_project_layer(monkeypatch, tmp_path) -> None:
+    """CLAUDE_PROJECT_DIR unset -> the project layer is SKIPPED, no file read (D-03).
+
+    Points the project-layer reader (parse_layer) at a spy and asserts it is
+    NEVER called; the injected config equals the resolved global/built-in base.
+    """
+    module = _load_entrypoint_module()
+    # Absent global FILE -> built-in base.
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+
+    calls: list[object] = []
+    real_parse = module.parse_layer
+
+    def _spy_parse(path):
+        calls.append(path)
+        return real_parse(path)
+
+    monkeypatch.setattr(module, "parse_layer", _spy_parse)
+
+    cfg = _capture_config_module(module, monkeypatch)
+
+    from safe_read_hook.config import builtin_config
+
+    assert calls == [], "project layer must not be read when CLAUDE_PROJECT_DIR unset"
+    assert cfg == builtin_config()
+
+
+def test_entrypoint_project_dir_empty_skips_project_layer(monkeypatch, tmp_path) -> None:
+    """An EMPTY CLAUDE_PROJECT_DIR is treated like unset -> project layer skipped."""
+    module = _load_entrypoint_module()
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", "")
+
+    calls: list[object] = []
+    real_parse = module.parse_layer
+    monkeypatch.setattr(
+        module, "parse_layer", lambda p: (calls.append(p), real_parse(p))[1]
+    )
+
+    cfg = _capture_config_module(module, monkeypatch)
+
+    from safe_read_hook.config import builtin_config
+
+    assert calls == []
+    assert cfg == builtin_config()
+
+
+def test_entrypoint_project_layer_narrows_legitimately(monkeypatch, tmp_path) -> None:
+    """A project layer that ADDS protected=["release"] + disabled=["pytest"] takes effect."""
+    module = _load_entrypoint_module()
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
+
+    project_dir = tmp_path / "repo"
+    (project_dir / ".claude").mkdir(parents=True)
+    (project_dir / ".claude" / "safe-read-hook.toml").write_text(
+        '[git]\nprotected_branches = ["release"]\n'
+        '[recognizers]\ndisabled = ["pytest"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))
+
+    cfg = _capture_config_module(module, monkeypatch)
+
+    # builtin base {master,main} UNION project {release}.
+    assert cfg.protected_branches == frozenset({"master", "main", "release"})
+    assert "pytest" in cfg.disabled_recognizers
+
+
+def test_entrypoint_criterion3_project_cannot_escalate(monkeypatch, tmp_path) -> None:
+    """CFG-03 first-class cannot-escalate: a hostile project layer has ZERO effect.
+
+    With a base protecting main / gating commit / disabling a recognizer, a
+    project layer that tries to "drop" those (it can only present add-only empty
+    sets) produces effective protected/gated/disabled sets IDENTICAL to the
+    no-project case. Asserts SET EQUALITY, not just a verdict.
+    """
+    module = _load_entrypoint_module()
+    # Trusted global base: protected main, gated commit, disabled sed.
+    global_path = tmp_path / "global.toml"
+    global_path.write_text(
+        '[git]\nprotected_branches = ["main"]\ngated_subcommands = ["commit"]\n'
+        '[recognizers]\ndisabled = ["sed"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", global_path)
+
+    # No-project effective sets (CLAUDE_PROJECT_DIR unset).
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    base_cfg = _capture_config_module(module, monkeypatch)
+
+    # A hostile project layer: it can only present empty/add-only sets (the schema
+    # has no remove/replace/enabled key), so it CANNOT drop main/commit/sed.
+    project_dir = tmp_path / "hostile"
+    (project_dir / ".claude").mkdir(parents=True)
+    (project_dir / ".claude" / "safe-read-hook.toml").write_text(
+        "[git]\nprotected_branches = []\ngated_subcommands = []\n"
+        "[recognizers]\ndisabled = []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))
+    hostile_cfg = _capture_config_module(module, monkeypatch)
+
+    assert hostile_cfg.protected_branches == base_cfg.protected_branches
+    assert hostile_cfg.gated_subcommands == base_cfg.gated_subcommands
+    assert hostile_cfg.disabled_recognizers == base_cfg.disabled_recognizers
+    # And the base members specifically survive (zero effect).
+    assert hostile_cfg.protected_branches == frozenset({"main"})
+    assert hostile_cfg.gated_subcommands == frozenset({"commit"})
+    assert hostile_cfg.disabled_recognizers == frozenset({"sed"})
+
+
+def test_entrypoint_malformed_project_drops_to_global_base(monkeypatch, tmp_path) -> None:
+    """A malformed PROJECT layer drops to the GOOD GLOBAL base (per-layer blast radius).
+
+    The global resolved fine (protected=["release"]); only the project layer is
+    broken -> the project layer is dropped, the global base is kept (NOT built-in).
+    """
+    module = _load_entrypoint_module()
+    global_path = tmp_path / "global.toml"
+    global_path.write_text('[git]\nprotected_branches = ["release"]\n', encoding="utf-8")
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", global_path)
+
+    project_dir = tmp_path / "repo"
+    (project_dir / ".claude").mkdir(parents=True)
+    (project_dir / ".claude" / "safe-read-hook.toml").write_text(
+        "this is not = valid = toml [[[", encoding="utf-8"
+    )
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))
+
+    cfg = _capture_config_module(module, monkeypatch)  # must not raise
+
+    # Dropped project layer -> the GOOD global base (release), NOT built-in.
+    assert cfg.protected_branches == frozenset({"release"})
+
+
 def test_process_sub_payload_emits_nothing() -> None:
     """Live A1 closure: cat <(curl evil) routes through tokenize -> abstain.
 
