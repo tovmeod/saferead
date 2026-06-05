@@ -291,19 +291,22 @@ def test_entrypoint_project_dir_unset_skips_layer(monkeypatch, tmp_path) -> None
     Points the project-layer reader (parse_layer) at a spy and asserts it is
     NEVER called; the injected config equals the resolved global/built-in base.
     """
+    import safe_read_hook.config as config_mod
+
     module = _load_entrypoint_module()
     # Absent global FILE -> built-in base.
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
 
     calls: list[object] = []
-    real_parse = module.parse_layer
+    real_parse = config_mod.parse_layer
 
     def _spy_parse(path):
         calls.append(path)
         return real_parse(path)
 
-    monkeypatch.setattr(module, "parse_layer", _spy_parse)
+    # Patch the REAL call site (resolve_config calls parse_layer in config.py).
+    monkeypatch.setattr(config_mod, "parse_layer", _spy_parse)
 
     cfg = _capture_config_module(module, monkeypatch)
 
@@ -315,14 +318,16 @@ def test_entrypoint_project_dir_unset_skips_layer(monkeypatch, tmp_path) -> None
 
 def test_entrypoint_project_dir_empty_skips_layer(monkeypatch, tmp_path) -> None:
     """An EMPTY CLAUDE_PROJECT_DIR is treated like unset -> project layer skipped."""
+    import safe_read_hook.config as config_mod
+
     module = _load_entrypoint_module()
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", "")
 
     calls: list[object] = []
-    real_parse = module.parse_layer
+    real_parse = config_mod.parse_layer
     monkeypatch.setattr(
-        module, "parse_layer", lambda p: (calls.append(p), real_parse(p))[1]
+        config_mod, "parse_layer", lambda p: (calls.append(p), real_parse(p))[1]
     )
 
     cfg = _capture_config_module(module, monkeypatch)
@@ -408,6 +413,149 @@ def test_entrypoint_malformed_project_drops_to_base(monkeypatch, tmp_path) -> No
     global_path.write_text(
         '[git]\nprotected_branches = ["release"]\n', encoding="utf-8"
     )
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", global_path)
+
+    project_dir = tmp_path / "repo"
+    (project_dir / ".claude").mkdir(parents=True)
+    (project_dir / ".claude" / "safe-read-hook.toml").write_text(
+        "this is not = valid = toml [[[", encoding="utf-8"
+    )
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))
+
+    cfg = _capture_config_module(module, monkeypatch)  # must not raise
+
+    # Dropped project layer -> the GOOD global base (release), NOT built-in.
+    assert cfg.protected_branches == frozenset({"release"})
+
+
+# --- Phase 9 Plan 03: resolve_config wiring + never-crash E2E (CFG-04) -----
+
+
+def test_entrypoint_uses_resolve_config(monkeypatch, tmp_path) -> None:
+    """The entrypoint resolves config via the single never-raising resolve_config.
+
+    Spies on ``safe_read_hook.config.resolve_config`` and asserts the entrypoint
+    calls it exactly once with (global_path, project_path) — the single
+    orchestrated call replacing the inline per-layer handling.
+    """
+    import safe_read_hook.config as config_mod
+
+    module = _load_entrypoint_module()
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
+
+    calls: list[tuple] = []
+    real_resolve = config_mod.resolve_config
+
+    def _spy_resolve(global_path, project_path, *args, **kwargs):
+        calls.append((global_path, project_path))
+        return real_resolve(global_path, project_path, *args, **kwargs)
+
+    monkeypatch.setattr(config_mod, "resolve_config", _spy_resolve)
+
+    _capture_config_module(module, monkeypatch)
+
+    assert len(calls) == 1, "entrypoint must make exactly one resolve_config call"
+    global_path, project_path = calls[0]
+    assert global_path == tmp_path / "no-global.toml"
+    assert project_path is None  # CLAUDE_PROJECT_DIR unset -> None (D-03)
+
+
+def test_entrypoint_malformed_global_e2e_does_not_crash(tmp_path) -> None:
+    """Real subprocess: a malformed GLOBAL config -> returncode 0, no traceback.
+
+    Repoints HOME at a temp dir holding a malformed
+    ``~/.config/claude-safe-hook/config.toml`` and runs the hook as a real
+    subprocess on a ``git commit`` payload. Asserts returncode 0 and no traceback
+    on stdout/stderr (CORE-06) — the never-crash contract end-to-end.
+    """
+    cfg_dir = tmp_path / ".config" / "claude-safe-hook"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.toml").write_text("this is not = valid = toml [[[", encoding="utf-8")
+
+    import os
+
+    env = dict(os.environ)
+    env["HOME"] = str(tmp_path)
+    env.pop("CLAUDE_PROJECT_DIR", None)  # skip the project layer (D-03)
+
+    payload = json.dumps(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git commit -m x"},
+            "cwd": str(tmp_path),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(_HOOK)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0
+    assert "Traceback" not in result.stdout
+    assert "Traceback" not in result.stderr
+
+
+def test_entrypoint_malformed_global_asks_on_main(monkeypatch, tmp_path) -> None:
+    """A malformed GLOBAL config -> built-in floor restored: git commit on main ASKs.
+
+    D-10 safe defaults: the malformed global degrades to built-in master/main +
+    add/commit/stash, so a gated op on ``main`` still ASKs (never auto-allowed,
+    never a traceback). Uses the module-import path with a stubbed branch resolver
+    (main) for a deterministic verdict.
+    """
+    module = _load_entrypoint_module()
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text("this is not = valid = toml [[[", encoding="utf-8")
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", cfg_path)
+    # Stub the branch resolver to a protected branch so the gated verdict is ASK.
+    monkeypatch.setattr(module, "_resolve_branch", lambda _cwd: "main")
+
+    captured: dict[str, object] = {}
+    real_context = module.Context
+
+    def _capture_context(*, cwd, _resolver, config):
+        captured["config"] = config
+        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+
+    monkeypatch.setattr(module, "Context", _capture_context)
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git commit -m x"},
+        "cwd": "/x",
+    }
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+
+    import io
+
+    out = io.StringIO()
+    monkeypatch.setattr("sys.stdout", out)
+    module.main()  # must not raise
+
+    from safe_read_hook.config import builtin_config
+
+    # Built-in floor restored (D-10 safe defaults).
+    assert captured["config"] == builtin_config()
+    # And the gated commit on main ASKs (not allow, not a traceback).
+    emitted = out.getvalue().strip()
+    assert emitted, "a gated commit on main must emit an envelope"
+    parsed = json.loads(emitted)
+    assert parsed["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+def test_entrypoint_malformed_project_keeps_global(monkeypatch, tmp_path) -> None:
+    """A malformed PROJECT config -> returncode 0, the valid global protection intact.
+
+    The global resolves fine (protected=["release"]); only the project layer is
+    broken -> the project layer is dropped, the global base survives (per-layer
+    blast radius via resolve_config, wired through the entrypoint).
+    """
+    module = _load_entrypoint_module()
+    global_path = tmp_path / "global.toml"
+    global_path.write_text('[git]\nprotected_branches = ["release"]\n', encoding="utf-8")
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", global_path)
 
     project_dir = tmp_path / "repo"
