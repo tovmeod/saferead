@@ -573,6 +573,94 @@ def test_entrypoint_malformed_project_keeps_global(monkeypatch, tmp_path) -> Non
     assert cfg.protected_branches == frozenset({"release"})
 
 
+# --- Phase 10 Plan 01: audit logging (LOG-01) -----------------------------
+
+
+def _run_in_process(module, monkeypatch, command: str, *, stdout=None):
+    """Drive module.main() in-process on a Bash payload (ROUTE A).
+
+    Repoints stdin to the payload; optionally captures stdout. A child subprocess
+    re-resolves _GLOBAL_CONFIG_PATH from Path.home() and ignores a parent
+    monkeypatch, so audit tests run IN-PROCESS where the repoint takes effect.
+    """
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "cwd": "/x",
+    }
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    if stdout is not None:
+        monkeypatch.setattr("sys.stdout", stdout)
+    module.main()
+
+
+def _point_audit(module, monkeypatch, tmp_path, audit_path, *, body_extra=""):
+    """Write a global TOML repointing the audit log to ``audit_path`` and wire it.
+
+    Skips the project layer (CLAUDE_PROJECT_DIR unset) so the global is the sole
+    source of the [logging] table.
+    """
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        f'[logging]\npath = "{audit_path}"\n{body_extra}', encoding="utf-8"
+    )
+    monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", cfg_path)
+
+
+def test_audit_allow_writes_one_jsonlines_record(monkeypatch, tmp_path) -> None:
+    """A real cat foo.txt allow -> exactly ONE audit line with the LOG-01 fields."""
+    module = _load_entrypoint_module()
+    audit = tmp_path / "audit.log"
+    _point_audit(module, monkeypatch, tmp_path, audit)
+
+    _run_in_process(module, monkeypatch, "cat foo.txt")
+
+    assert audit.exists(), "audit line must land in the repointed file"
+    lines = audit.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    rec = json.loads(lines[0])
+    assert set(rec) == {"ts", "decision", "tag", "reason", "command"}
+    assert rec["decision"] == "allow"
+    assert rec["tag"] == "reader"
+    assert rec["command"] == "cat foo.txt"
+
+
+def test_audit_ask_records_git_decision(monkeypatch, tmp_path) -> None:
+    """A gated git commit on a protected branch -> one audit line, decision=ask, tag=git."""
+    module = _load_entrypoint_module()
+    audit = tmp_path / "audit.log"
+    _point_audit(module, monkeypatch, tmp_path, audit)
+    # Stub the resolver to a protected branch so the gated verdict is ASK.
+    monkeypatch.setattr(module, "_resolve_branch", lambda _cwd: "main")
+
+    _run_in_process(module, monkeypatch, "git commit -m x")
+
+    lines = audit.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    rec = json.loads(lines[0])
+    assert rec["decision"] == "ask"
+    assert rec["tag"] == "git"
+
+
+def test_audit_envelope_has_no_tag_key(monkeypatch, tmp_path) -> None:
+    """The stdout hookSpecificOutput envelope is unchanged: NO tag key (contract)."""
+    module = _load_entrypoint_module()
+    audit = tmp_path / "audit.log"
+    _point_audit(module, monkeypatch, tmp_path, audit)
+
+    out = io.StringIO()
+    _run_in_process(module, monkeypatch, "cat foo.txt", stdout=out)
+
+    parsed = json.loads(out.getvalue().strip())
+    hso = parsed["hookSpecificOutput"]
+    assert set(hso) == {
+        "hookEventName",
+        "permissionDecision",
+        "permissionDecisionReason",
+    }
+
+
 def test_process_sub_payload_emits_nothing() -> None:
     """Live A1 closure: cat <(curl evil) routes through tokenize -> abstain.
 
