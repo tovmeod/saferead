@@ -661,6 +661,69 @@ def test_audit_envelope_has_no_tag_key(monkeypatch, tmp_path) -> None:
     }
 
 
+def test_audit_abstain_writes_no_line(monkeypatch, tmp_path) -> None:
+    """D-03: an abstain payload (fold->None compound) produces NO audit line.
+
+    The write site is after both abstain returns, so abstains are not logged for
+    free. The audit file must not exist (nothing was appended).
+    """
+    module = _load_entrypoint_module()
+    audit = tmp_path / "audit.log"
+    _point_audit(module, monkeypatch, tmp_path, audit)
+
+    _run_in_process(module, monkeypatch, "cat foo && rm -rf x")
+
+    assert not audit.exists(), "an abstain must not append an audit record"
+
+
+def test_audit_unwritable_never_raises_emits_envelope(monkeypatch, tmp_path) -> None:
+    """CORE-06: an unwritable audit path -> still emits the envelope, never raises.
+
+    Points log_path at a path whose PARENT is a regular file (open-for-append
+    fails reliably, even as root), exercising audit_log's try/except: pass.
+    """
+    module = _load_entrypoint_module()
+    parent_file = tmp_path / "not-a-dir"
+    parent_file.write_text("", encoding="utf-8")
+    audit = parent_file / "audit.log"  # parent is a file -> open() fails
+    _point_audit(module, monkeypatch, tmp_path, audit)
+
+    out = io.StringIO()
+    _run_in_process(module, monkeypatch, "cat foo.txt", stdout=out)  # must not raise
+
+    parsed = json.loads(out.getvalue().strip())
+    assert parsed["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert not audit.exists()
+
+
+def test_audit_logging_enabled_false_override_suppresses_line(
+    monkeypatch, tmp_path
+) -> None:
+    """D-04/D-05: [logging] enabled=false -> no line; enabled=true+path -> line.
+
+    Drives the override end-to-end through resolve_config: with enabled=false NO
+    record is written even on an allow; flipping enabled=true writes one line at
+    the configured path.
+    """
+    module = _load_entrypoint_module()
+
+    # enabled=false: no audit line even on an allow.
+    audit_off = tmp_path / "off.log"
+    _point_audit(
+        module, monkeypatch, tmp_path, audit_off, body_extra="enabled = false\n"
+    )
+    _run_in_process(module, monkeypatch, "cat foo.txt")
+    assert not audit_off.exists(), "enabled=false must suppress the audit record"
+
+    # enabled=true at a fresh path: exactly one line lands there.
+    audit_on = tmp_path / "on.log"
+    _point_audit(
+        module, monkeypatch, tmp_path, audit_on, body_extra="enabled = true\n"
+    )
+    _run_in_process(module, monkeypatch, "cat foo.txt")
+    assert audit_on.read_text(encoding="utf-8").splitlines() != []
+
+
 def test_process_sub_payload_emits_nothing() -> None:
     """Live A1 closure: cat <(curl evil) routes through tokenize -> abstain.
 
