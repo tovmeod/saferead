@@ -9,8 +9,9 @@ permission prompts. It decomposes compound Bash commands (`&&`, `||`, `;`, `|`,
 newlines — quote/backtick/`$()`-aware) and allows a segment set only when *every*
 segment is a recognized safe read. It also ASKs for confirmation on gated git
 writes (`add`/`commit`/`stash`) when the working branch is protected
-(`master`/`main`). It is for a single power-user (the author) today, with a
-later goal of being installable and configurable by others.
+(`master`/`main`). It is for a single power-user (the author) today; it is now
+being shaped into an installable, configurable package published for others to
+run via `uvx` (the goal that motivated dropping the stdlib-only rule).
 
 It is **complementary to `dcg`** (`~/.local/bin/dcg`), which remains the
 authority for *blocking* dangerous commands. This hook never denies — it only
@@ -23,10 +24,10 @@ that guarantee; when in doubt, abstain.
 
 ### Constraints
 
-- **Tech stack**: Python, standard library only — no runtime dependencies. TOML via stdlib `tomllib` (Python 3.11+). Keeps the hook trivially deployable.
+- **Tech stack**: Python. **Runtime dependencies are now permitted** (changed at Phase 11, 2026-06-06; the earlier "standard library only — no runtime dependencies" rule is **superseded**). The project is becoming a `uvx`-published package. Dep discipline: keep the set small and justified, **pin versions**, **lazy-import any dep on the hot path** (the latency-sensitive decision path), and **abstain-never-crash** on dep errors. TOML config still uses stdlib `tomllib` (Python 3.11+). First runtime dep: `pglast` (libpg_query — real PostgreSQL parser) for the Phase 11 SQL analyzer.
 - **Safety**: Conservative-by-default. Any ambiguity → abstain. A false-allow (approving a state-mutating command) is the cardinal failure; favor zero false-allows over broader coverage.
-- **Reliability**: The hook must never crash or block Claude's flow; all errors are caught and logged (currently to `/tmp/claude-hook.log`), and the hook abstains on failure.
-- **Performance**: Decision path must remain low-latency since it runs on every Bash invocation.
+- **Reliability**: The hook must never crash or block Claude's flow; all errors are caught and logged (currently to `/tmp/claude-hook.log`), and the hook abstains on failure. A runtime dep that raises must be caught and abstain, never crash.
+- **Performance**: Decision path must remain low-latency since it runs on every Bash invocation; runtime deps lazy-imported off the common read path.
 - **Compatibility**: Must keep emitting the Claude Code PreToolUse hook output contract.
 <!-- GSD:project-end -->
 
@@ -34,9 +35,10 @@ that guarantee; when in doubt, abstain.
 ## Technology Stack
 
 ## The Cardinal Constraint: Runtime vs Dev
+> **SUPERSEDED at Phase 11 (2026-06-06):** "stdlib only — no runtime deps" is no longer in force. Runtime deps are permitted (uvx distribution); keep them small/justified/pinned, lazy-import on the hot path, abstain-never-crash on dep errors. First dep: `pglast`. `tomllib` stays stdlib.
 | Layer | Contents | Lives in pyproject as |
 |-------|----------|------------------------|
-| **Runtime** | Python stdlib only (`json`, `re`, `subprocess`, `sys`, `tomllib`, `pathlib`, …) | `dependencies = []` |
+| **Runtime** | Python stdlib + pinned deps (`tomllib` stdlib; `pglast` for SQL) — small, justified, lazy-imported on the hot path | `dependencies = ["pglast", …]` |
 | **Dev / CI** | pytest, ruff, a type checker, build backend | `[dependency-groups]` / `[project.optional-dependencies]` |
 ## Recommended Stack
 ### Runtime (shipped artifact)
@@ -59,7 +61,7 @@ that guarantee; when in doubt, abstain.
 - **Exec form (recommended):** `"command": "python3", "args": ["${CLAUDE_PROJECT_DIR}/hooks/safe_read_hook.py"]`
 - **Shell form:** single `command` string with pipes/`&&`; requires manual quoting.
 ## Rationale Summary (why these, briefly)
-- **stdlib-only runtime** — non-negotiable per PROJECT.md; preserves zero-install deployability and keeps the
+- **~~stdlib-only runtime~~ (SUPERSEDED Phase 11)** — runtime deps now permitted (uvx); discipline that survives: small/justified/pinned, lazy-import on hot path, abstain-never-crash. Preserves zero-install deployability and keeps the
 - **3.11 floor + tomllib** — the single decision that makes TOML config free of runtime deps.
 - **ruff** — collapses 4–5 legacy tools into one fast binary; one `[tool.ruff]` block.
 - **pytest** — the table/parametrize model fits a recognizer registry and an adversarial corpus perfectly.
@@ -74,7 +76,7 @@ that guarantee; when in doubt, abstain.
 | **black + isort + flake8 (separate tools)** | Three configs, three installs, slower; superseded. | ruff (lint + format). |
 | **Poetry / `poetry-core` backend** | Heavier workflow, non-PEP-621 history, no benefit for a zero-dep pure-Python lib. | hatchling (or uv_build). |
 | **`ty` / `pyrefly` as the primary type checker** | Astral `ty` is beta (~53% spec conformance); pyrefly is new. Promising and very fast, but not the safe primary for a *safety-critical* tool in 2026. | pyright (or mypy 2.x); revisit `ty` later. |
-| **Runtime deps for shell parsing (`bashlex`, `shlex`-heavy rewrites, `pyparsing`)** | New runtime dep + the seed's quote/`$()`/backtick-aware splitter already works and is fast. Replacing it risks behavior drift on the exact security-sensitive path. | Keep the existing hand-written `split_compound`; just extract + test it. |
+| **Runtime deps for *bash* parsing (`bashlex`, `shlex`-heavy rewrites, `pyparsing`)** | The from-scratch bash tokenizer (Phase 4) works and is fast; replacing it risks behavior drift on the security-sensitive path. (Post-Phase-11 the objection is behavior-drift, NOT "deps forbidden" — deps are allowed; SQL/Python DO adopt a real parser like `pglast`.) | Keep the from-scratch bash tokenizer; use real parsers for embedded sublanguages (SQL/Python). |
 | **`argparse` / CLI frameworks (click/typer) on the hook path** | The hook's only input is a JSON stdin payload; no CLI surface. Adds deps and startup cost. | Plain `sys.stdin.read()` + `json.loads`. |
 | **Async anything** | Single short-lived process per Bash call; async adds overhead and complexity with zero benefit. | Synchronous stdlib. |
 | **`setuptools` with `setup.py`** | Legacy boilerplate; no compiled extensions to justify it. | hatchling + declarative pyproject. |
