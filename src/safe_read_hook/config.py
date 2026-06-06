@@ -41,13 +41,17 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 #: The built-in protected branches — the floor a broken/absent config falls to.
 _BUILTIN_PROTECTED = frozenset({"master", "main"})
 #: The built-in gated subcommands — the floor a broken/absent config falls to.
 _BUILTIN_GATED = frozenset({"add", "commit", "stash"})
+#: The built-in audit-log path — distinct from the error log (/tmp/claude-hook.log).
+_BUILTIN_AUDIT_PATH = Path("/tmp/claude-hook-audit.log")
+#: Audit logging is on by default (LOG-01).
+_BUILTIN_LOG_ENABLED = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,11 +66,18 @@ class ResolvedConfig:
         gated_subcommands: Git subcommands gated on the working branch.
         disabled_recognizers: Recognizer tags disabled for the run (carried this
             plan; consumed in a later plan).
+        log_enabled: Whether to append an audit record per emitted decision
+            (LOG-01). DEFAULTED so the pre-Phase-10 3-field constructors keep
+            compiling and inherit the built-in default.
+        log_path: Audit-log file the per-decision JSON-lines records append to —
+            distinct from the error log. DEFAULTED (see ``log_enabled``).
     """
 
     protected_branches: frozenset[str]
     gated_subcommands: frozenset[str]
     disabled_recognizers: frozenset[str]
+    log_enabled: bool = _BUILTIN_LOG_ENABLED
+    log_path: Path = field(default=_BUILTIN_AUDIT_PATH)
 
 
 def builtin_config() -> ResolvedConfig:
@@ -80,6 +91,8 @@ def builtin_config() -> ResolvedConfig:
         protected_branches=_BUILTIN_PROTECTED,
         gated_subcommands=_BUILTIN_GATED,
         disabled_recognizers=frozenset(),
+        log_enabled=_BUILTIN_LOG_ENABLED,
+        log_path=_BUILTIN_AUDIT_PATH,
     )
 
 
@@ -96,6 +109,8 @@ class RawLayer:
     protected_branches: frozenset[str] | None
     gated_subcommands: frozenset[str] | None
     disabled_recognizers: frozenset[str] | None
+    log_path: Path | None = None
+    log_enabled: bool | None = None
 
 
 def _coerce_str_set(value: object, key: str) -> frozenset[str]:
@@ -111,6 +126,28 @@ def _coerce_str_set(value: object, key: str) -> frozenset[str]:
         if not isinstance(item, str):
             raise TypeError(f"{key} entries must be strings, got {type(item).__name__}")
     return frozenset(value)
+
+
+def _coerce_path(value: object, key: str) -> Path:
+    """Coerce a TOML value to a ``Path`` or raise on a malformed (non-str) value.
+
+    Mirrors :func:`_coerce_str_set`'s raise-on-malformed so the never-raising
+    ladder degrades fail-closed (D-06).
+    """
+    if not isinstance(value, str):
+        raise TypeError(f"{key} must be a string, got {type(value).__name__}")
+    return Path(value)
+
+
+def _coerce_bool(value: object, key: str) -> bool:
+    """Coerce a TOML value to a ``bool`` or raise on a malformed value.
+
+    ``bool`` is checked BEFORE any truthiness shortcut so a stray string/int fails
+    closed rather than silently enabling/disabling logging.
+    """
+    if not isinstance(value, bool):
+        raise TypeError(f"{key} must be a boolean, got {type(value).__name__}")
+    return value
 
 
 def parse_layer(path: Path) -> RawLayer:
@@ -131,6 +168,9 @@ def parse_layer(path: Path) -> RawLayer:
     rec_table = data.get("recognizers", {})
     if not isinstance(rec_table, dict):
         raise TypeError("[recognizers] must be a table")
+    log_table = data.get("logging", {})
+    if not isinstance(log_table, dict):
+        raise TypeError("[logging] must be a table")
 
     protected = (
         _coerce_str_set(git_table["protected_branches"], "protected_branches")
@@ -147,10 +187,22 @@ def parse_layer(path: Path) -> RawLayer:
         if "disabled" in rec_table
         else None
     )
+    log_path = (
+        _coerce_path(log_table["path"], "[logging] path")
+        if "path" in log_table
+        else None
+    )
+    log_enabled = (
+        _coerce_bool(log_table["enabled"], "[logging] enabled")
+        if "enabled" in log_table
+        else None
+    )
     return RawLayer(
         protected_branches=protected,
         gated_subcommands=gated,
         disabled_recognizers=disabled,
+        log_path=log_path,
+        log_enabled=log_enabled,
     )
 
 
@@ -186,6 +238,15 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
     project layer (union/add can only retain or add), so a hostile project value
     that "tries" to drop ``main`` / un-gate ``commit`` / re-enable a recognizer has
     ZERO effect. Pure (no I/O).
+
+    LOGGING is the deliberate EXCEPTION to the union/narrow-only mechanism above.
+    ``log_path``/``log_enabled`` use SCALAR COALESCE — a present project value FULLY
+    overrides the base (``project value if not None else base``), NOT a union. This
+    is intentional (D-05): logging is non-trust-affecting — it changes NO
+    allow/ask/abstain verdict, so it sits OUTSIDE the narrow-only invariant and is
+    cardinal-safe (a hostile project can disable/redirect THIS repo's audit trail,
+    an ACCEPTED tradeoff, T-10-01). Do NOT unify it with the trust-set union and do
+    NOT add path validation.
     """
     project_protected = (
         project.protected_branches
@@ -197,6 +258,10 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
         if project.disabled_recognizers is not None
         else frozenset()
     )
+    log_path = project.log_path if project.log_path is not None else base.log_path
+    log_enabled = (
+        project.log_enabled if project.log_enabled is not None else base.log_enabled
+    )
     return ResolvedConfig(
         protected_branches=base.protected_branches | project_protected,
         # gated_subcommands: base ONLY — the untrusted project must NOT contribute
@@ -205,6 +270,8 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
         # override rationale.
         gated_subcommands=base.gated_subcommands,
         disabled_recognizers=base.disabled_recognizers | project_disabled,
+        log_path=log_path,
+        log_enabled=log_enabled,
     )
 
 
@@ -237,6 +304,12 @@ def load_layer(path: Path) -> ResolvedConfig:
             raw.disabled_recognizers
             if raw.disabled_recognizers is not None
             else frozenset()
+        ),
+        log_path=(
+            raw.log_path if raw.log_path is not None else _BUILTIN_AUDIT_PATH
+        ),
+        log_enabled=(
+            raw.log_enabled if raw.log_enabled is not None else _BUILTIN_LOG_ENABLED
         ),
     )
 
