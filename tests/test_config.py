@@ -23,6 +23,8 @@ from safe_read_hook.config import (
     resolve_config,
 )
 
+_DEFAULT_AUDIT_PATH = Path("/tmp/claude-hook-audit.log")
+
 
 def _write(tmp_path: Path, body: str) -> Path:
     path = tmp_path / "config.toml"
@@ -368,3 +370,134 @@ def test_resolve_config_absent_git_table_not_malformed(tmp_path: Path) -> None:
     assert result.gated_subcommands == frozenset({"add", "commit", "stash"})
     # And the valid [recognizers] table was honored (proves it wasn't dropped).
     assert result.disabled_recognizers == frozenset({"sed"})
+
+
+# --- Phase 10 Plan 01: [logging] table (LOG-01 / D-04..D-06) --------------
+
+
+def test_builtin_config_has_logging_defaults() -> None:
+    """builtin_config() carries the logging defaults: enabled True, default path."""
+    cfg = builtin_config()
+    assert cfg.log_enabled is True
+    assert cfg.log_path == _DEFAULT_AUDIT_PATH
+
+
+def test_resolved_config_logging_fields_default_when_omitted() -> None:
+    """Existing 3-field ResolvedConfig(...) constructors inherit logging defaults.
+
+    Pitfall 6: the logging fields are DEFAULTED so the pre-Phase-10 construction
+    sites keep compiling and inherit enabled=True + the default audit path.
+    """
+    cfg = ResolvedConfig(
+        protected_branches=frozenset({"release"}),
+        gated_subcommands=frozenset({"commit"}),
+        disabled_recognizers=frozenset({"pytest"}),
+    )
+    assert cfg.log_enabled is True
+    assert cfg.log_path == _DEFAULT_AUDIT_PATH
+
+
+def test_merge_logging_project_overrides_base() -> None:
+    """merge: a present project [logging] FULLY overrides base (coalesce, D-04/D-05).
+
+    Logging is non-trust-affecting (changes no allow/ask/abstain verdict), so the
+    project layer is allowed full scalar override — NOT a union with the base.
+    """
+    base = ResolvedConfig(
+        protected_branches=frozenset({"main"}),
+        gated_subcommands=frozenset({"commit"}),
+        disabled_recognizers=frozenset(),
+        log_enabled=True,
+        log_path=Path("/var/log/base-audit.log"),
+    )
+    project = RawLayer(
+        protected_branches=None,
+        gated_subcommands=None,
+        disabled_recognizers=None,
+        log_enabled=False,
+        log_path=Path("/p/project-audit.log"),
+    )
+    result = merge(base, project)
+    assert result.log_enabled is False
+    assert result.log_path == Path("/p/project-audit.log")
+
+
+def test_merge_logging_absent_keeps_base() -> None:
+    """merge: absent project logging keys (None) keep the base values (coalesce)."""
+    base = ResolvedConfig(
+        protected_branches=frozenset({"main"}),
+        gated_subcommands=frozenset({"commit"}),
+        disabled_recognizers=frozenset(),
+        log_enabled=False,
+        log_path=Path("/var/log/base-audit.log"),
+    )
+    project = RawLayer(
+        protected_branches=None,
+        gated_subcommands=None,
+        disabled_recognizers=None,
+        log_enabled=None,
+        log_path=None,
+    )
+    result = merge(base, project)
+    assert result.log_enabled is False
+    assert result.log_path == Path("/var/log/base-audit.log")
+
+
+def test_load_layer_absent_logging_table_is_builtin_default(tmp_path: Path) -> None:
+    """D-06: a TOML with no [logging] table -> enabled True, default audit path."""
+    path = _write(tmp_path, '[git]\nprotected_branches = ["main"]\n')
+    cfg = load_layer(path)
+    assert cfg.log_enabled is True
+    assert cfg.log_path == _DEFAULT_AUDIT_PATH
+
+
+def test_load_layer_logging_table_honored(tmp_path: Path) -> None:
+    """A present [logging] path/enabled is honored verbatim (D-04)."""
+    path = _write(
+        tmp_path,
+        '[logging]\npath = "/tmp/x.log"\nenabled = false\n',
+    )
+    cfg = load_layer(path)
+    assert cfg.log_path == Path("/tmp/x.log")
+    assert cfg.log_enabled is False
+
+
+def test_load_layer_logging_partial_path_only(tmp_path: Path) -> None:
+    """[logging] with only path set keeps enabled at the built-in default."""
+    path = _write(tmp_path, '[logging]\npath = "/tmp/only-path.log"\n')
+    cfg = load_layer(path)
+    assert cfg.log_path == Path("/tmp/only-path.log")
+    assert cfg.log_enabled is True
+
+
+def test_load_layer_logging_enabled_non_bool_raises(tmp_path: Path) -> None:
+    """A non-bool [logging] enabled RAISES (entrypoint degrades fail-closed)."""
+    path = _write(tmp_path, '[logging]\nenabled = "yes"\n')
+    with pytest.raises((TypeError, ValueError)):
+        load_layer(path)
+
+
+def test_load_layer_logging_path_non_str_raises(tmp_path: Path) -> None:
+    """A non-str [logging] path RAISES (entrypoint degrades fail-closed)."""
+    path = _write(tmp_path, "[logging]\npath = 5\n")
+    with pytest.raises((TypeError, ValueError)):
+        load_layer(path)
+
+
+def test_load_layer_logging_not_a_table_raises(tmp_path: Path) -> None:
+    """A [logging] that is not a table RAISES (mirrors [git]/[recognizers])."""
+    path = _write(tmp_path, 'logging = "nope"\n')
+    with pytest.raises((TypeError, ValueError)):
+        load_layer(path)
+
+
+def test_resolve_config_malformed_logging_global_fails_closed(tmp_path: Path) -> None:
+    """D-06/CORE-06: a malformed [logging] in the GLOBAL degrades to built-in default.
+
+    The never-raising ladder drops the broken global to builtin_config(), so the
+    logging default (enabled True, default path) is restored — no exception.
+    """
+    global_path = _write_named(tmp_path, "global.toml", '[logging]\nenabled = "yes"\n')
+    result = resolve_config(global_path, None)  # must not raise
+    assert result.log_enabled is True
+    assert result.log_path == _DEFAULT_AUDIT_PATH
