@@ -34,6 +34,23 @@ def log(msg: str) -> None:
         pass
 
 
+def audit_log(path: Path, record: dict) -> None:
+    """Best-effort append one JSON-lines audit record to ``path``; never raises.
+
+    A structural twin of :func:`log` (CORE-06 best-effort): a write failure (an
+    unwritable path, a directory target) is swallowed so the hook still emits its
+    stdout envelope and exits 0. ``json.dumps`` escapes embedded quotes/operators
+    in reason/command and emits no embedded newline for a flat dict, so the
+    one-record-per-line invariant holds even for a command with ``&&``/quotes
+    (T-10-03). The audit file is distinct from the error log.
+    """
+    try:
+        with path.open("a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
+
 # Deploy form is `python3 .../hooks/safe_read_hook.py`, which puts THIS file's
 # directory on sys.path[0]. Because this file is named safe_read_hook.py, it
 # would otherwise shadow the installed `safe_read_hook` PACKAGE — `import
@@ -133,10 +150,11 @@ def main() -> None:
         command = payload.get("tool_input", {}).get("command", "")
         if not isinstance(command, str) or not command:
             return
+        config = _load_config()
         ctx = Context(
             cwd=payload.get("cwd"),
             _resolver=_resolve_branch,
-            config=_load_config(),
+            config=config,
         )
         result = tokenize(command)
         if result.abstain_reason is not None:
@@ -155,6 +173,20 @@ def main() -> None:
                 }
             )
         )
+        # Audit AFTER both abstain returns (D-03 — abstains are NOT logged) and
+        # AFTER the envelope is emitted (CORE-06 — the decision is delivered even
+        # if the audit write fails). tag goes ONLY here, never to the envelope.
+        if config.log_enabled:
+            audit_log(
+                config.log_path,
+                {
+                    "ts": datetime.now().isoformat(),
+                    "decision": verdict.decision,
+                    "tag": verdict.tag,
+                    "reason": verdict.reason,
+                    "command": command,
+                },
+            )
     except Exception:
         log("uncaught exception:\n" + traceback.format_exc())
 

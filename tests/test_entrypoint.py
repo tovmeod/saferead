@@ -627,7 +627,7 @@ def test_audit_allow_writes_one_jsonlines_record(monkeypatch, tmp_path) -> None:
 
 
 def test_audit_ask_records_git_decision(monkeypatch, tmp_path) -> None:
-    """A gated git commit on a protected branch -> one audit line, decision=ask, tag=git."""
+    """A gated git commit on a protected branch -> one ask audit line, tag=git."""
     module = _load_entrypoint_module()
     audit = tmp_path / "audit.log"
     _point_audit(module, monkeypatch, tmp_path, audit)
