@@ -125,6 +125,8 @@ def _funccall_admitted(node: _ast.FuncCall) -> bool:
     not admitted (the caller abstains). Children (``args``) are still walked by
     the caller AFTER admission, so ``count(nextval('s'))`` still abstains.
     """
+    if node.funcname is None:
+        return False
     comps = [c.sval for c in node.funcname]
     if len(comps) == 1:
         return comps[0] in _ALLOWED_FUNCS
