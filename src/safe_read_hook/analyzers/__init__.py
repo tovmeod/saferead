@@ -20,6 +20,7 @@ from collections.abc import Callable
 
 from ..verdict import Verdict
 from .python_skeleton import analyze_python
+from .sql import analyze_sql
 
 #: The per-language analyzer contract (D4-08): analyze(source) -> Verdict | None.
 Analyzer = Callable[[str], "Verdict | None"]
@@ -28,4 +29,5 @@ Analyzer = Callable[[str], "Verdict | None"]
 #: Add a language = one import above + one entry here.
 ANALYZERS: dict[str, Analyzer] = {
     "python": analyze_python,
+    "sql": analyze_sql,
 }
