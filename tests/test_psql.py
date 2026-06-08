@@ -83,7 +83,7 @@ def test_psql_readonly_allow(segment: str, ctx: Context) -> None:
         # if the whole tail is audited before dispatch (early-dispatch trap).
         'psql -c "SELECT 1" -c "DELETE FROM t"',
         'psql -c "SELECT 1" -f x.sql',  # -c combined with -f
-        "psql --no-such-flag -c \"SELECT 1\"",  # unknown flag -> abstain
+        'psql --no-such-flag -c "SELECT 1"',  # unknown flag -> abstain
         "psql",  # bare psql, no -c
     ],
 )

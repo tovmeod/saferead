@@ -26,6 +26,7 @@ from .adb import recognize_adb
 from .find import recognize_find
 from .git import recognize_git
 from .gradle import recognize_gradle
+from .psql import recognize_psql
 from .pytest_runner import recognize_pytest
 from .reader import recognize_reader
 from .sed import recognize_sed
@@ -71,4 +72,5 @@ REGISTRY: list[Recognizer] = [
     _guarded("adb", recognize_adb),
     _guarded("pytest", recognize_pytest),
     _guarded("gradle", recognize_gradle),
+    _guarded("psql", recognize_psql),
 ]

@@ -95,12 +95,12 @@ def test_disable_is_monotonic_toward_more_prompts() -> None:
 
 
 def test_registry_entries_are_callable_guards() -> None:
-    """REGISTRY holds 7 callable guards (closures, not bare recognizer functions).
+    """REGISTRY holds 8 callable guards (closures, not bare recognizer functions).
 
     Re-expresses the old element-identity assertion as a behavior/shape check:
     after wrapping, REGISTRY entries are guard closures, so identity membership
     (``recognize_git in REGISTRY``) no longer holds — order/behavior is what the
     engine depends on.
     """
-    assert len(REGISTRY) == 7
+    assert len(REGISTRY) == 8
     assert all(callable(entry) for entry in REGISTRY)
