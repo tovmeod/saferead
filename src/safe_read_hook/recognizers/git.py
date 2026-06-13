@@ -37,11 +37,13 @@ and ``stash push`` are NOT gated; they currently fall through to ``None``
 
 from __future__ import annotations
 
+import os
 import re
 
 from ..context import Context
 from ..tokenizer import tokenize
 from ..verdict import Verdict
+from ._pathscope import resolve_lexical
 
 # Discard redirects that never write a user file (mirrors reader.py). A token
 # matching this EXACTLY (``fullmatch``) is permitted; any other token bearing a
@@ -188,10 +190,135 @@ def recognize_git(segment: str, ctx: Context) -> Verdict | None:
             # visible. Diverges from the seed's abstain.
             return Verdict("ask", "unresolved branch — approve manually", "git")
         if branch in ctx.config.protected_branches:
+            if sub in ("add", "commit") and _planning_only(sub, args, effective_cwd, ctx):
+                return Verdict("allow", ".planning/ doc commit on protected branch", "git")
             return Verdict("ask", f"protected branch '{branch}'", "git")
         return Verdict("allow", f"gated git op on '{branch}'", "git")
 
     return None
+
+
+def _planning_only(sub: str, args: list[str], effective_cwd: str | None, ctx: Context) -> bool:
+    """Return True iff the add/commit touches ONLY the hardcoded ``.planning/`` tree.
+
+    Prove-or-ASK (D-08): explicit pathspecs are lexically checked; a bare
+    ``commit`` (no positionals AND no ``--``) consults the staged-set probe.
+    Stage-all forms and any escape -> False (-> ASK). ``.planning/`` is
+    HARDCODED (D-09) — never read from ``ctx.config``.
+
+    B1/B2 contract (cardinal):
+    - Any positional pathspec (with OR without ``--``) routes to the explicit-
+      pathspec branch and the probe is NEVER consulted.
+    - The probe is consulted ONLY for a genuinely-bare ``commit`` (zero
+      positionals AND no ``--`` after flag-value skipping).
+
+    Args:
+        sub: The git subcommand (``"add"`` or ``"commit"``).
+        args: Tokens after the subcommand (from the leading-option scan).
+        effective_cwd: The ``-C``-derived cwd (or ``ctx.cwd``) the probe runs against.
+        ctx: The per-segment context carrying ``_staged_resolver``.
+
+    Returns:
+        ``True`` when the affected set is provably under ``.planning/``;
+        ``False`` (-> ASK) in every ambiguous/unsafe case.
+    """
+    # .planning/ is HARDCODED (D-09). The root is resolved against effective_cwd
+    # so that a -C /other/repo invocation still scopes to THAT repo's .planning/.
+    if effective_cwd is not None:
+        planning_root = os.path.normpath(os.path.join(effective_cwd, ".planning"))
+    else:
+        # Unknown cwd: relative paths cannot be scoped -> cannot prove -> ASK.
+        # Absolute paths could still work, but we conservatively fall through to
+        # the pathspec check below which will call resolve_lexical returning None
+        # for relative operands (causing False).
+        planning_root = None
+
+    def _under_planning(resolved: str | None) -> bool:
+        """True iff resolved is equal to or a child of planning_root (component-boundary safe)."""
+        if resolved is None or planning_root is None:
+            return False
+        nr = planning_root  # already normpath'd above
+        return resolved == nr or resolved.startswith(nr + os.sep)
+
+    if sub == "add":
+        # Stage-all forms: add -A, add --all -> cannot prove.
+        if any(tok in ("-A", "--all") for tok in args):
+            return False
+        # Collect bare (non-flag) path tokens. add . is stage-all.
+        paths: list[str] = []
+        for tok in args:
+            if tok.startswith("-"):
+                continue
+            if tok == ".":
+                return False  # add . stages everything -> cannot prove
+            paths.append(tok)
+        if not paths:
+            # Bare 'git add' with no paths: nothing to add -> cannot prove -> ASK.
+            return False
+        return all(_under_planning(resolve_lexical(p, effective_cwd)) for p in paths)
+
+    # sub == "commit"
+    # Stage-all forms: commit -a, commit --all -> cannot prove.
+    if any(tok in ("-a", "--all") for tok in args):
+        return False
+
+    # Skip flag-value pairs: -m <msg>, -F <file>, --author <author>.
+    # Collect: (a) positionals before '--', (b) tokens after '--' as pathspecs.
+    # A positional (not starting with '-') before '--' is ALSO a pathspec (B1).
+    # Value flags that take a following argument: the next token is the VALUE and
+    # must be skipped (T-14-15: 'msg' in 'git commit -m msg' is not a path).
+    # Value-bearing flags whose NEXT token is the flag value (not a pathspec).
+    # T-14-15: 'msg' in 'git commit -m msg' must not be treated as a pathspec.
+    _VALUE_FLAGS = frozenset({"-m", "-F", "--author", "--message", "--file", "--cleanup",
+                               "-C", "--reuse-message", "-c", "--reedit-message",
+                               "-e", "--edit"})
+
+    positionals: list[str] = []
+    has_separator = False
+    post_sep_tokens: list[str] = []
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--":
+            has_separator = True
+            post_sep_tokens = args[i + 1:]
+            break
+        if tok in _VALUE_FLAGS:
+            i += 2  # skip flag and its value
+            continue
+        if tok.startswith("-"):
+            i += 1  # a boolean flag or unrecognized flag (not a pathspec)
+            continue
+        # A bare token before '--': this is a positional pathspec (B1 — collect it).
+        positionals.append(tok)
+        i += 1
+
+    if has_separator:
+        # pathspecs are the post-'--' tokens; positionals are also present if any
+        # were collected before '--'. ALL tokens (positionals + post-sep) must be
+        # under .planning/ (B1: a pre-'--' positional is still a pathspec).
+        all_specs = positionals + post_sep_tokens
+        if not all_specs:
+            # '--' with nothing after and no positionals before: treat as bare commit.
+            # Fall through to the probe path (has_separator=True but no specs collected).
+            pass
+        else:
+            return all(_under_planning(resolve_lexical(p, effective_cwd)) for p in all_specs)
+
+    if positionals:
+        # Positional pathspecs present (before '--', or no '--'): prove from them.
+        # Do NOT consult the probe (B1/B2).
+        return all(_under_planning(resolve_lexical(p, effective_cwd)) for p in positionals)
+
+    # Genuinely bare commit: zero positionals AND (no '--' OR '--' with no tokens).
+    # Consult the staged-set probe. (B2: this branch is only reached when zero
+    # positionals exist AND no explicit pathspecs were collected.)
+    staged = ctx._staged_resolver(effective_cwd)
+    if staged is None:
+        return False  # probe error -> cannot prove -> ASK
+    if not staged:
+        return False  # empty staged set -> nothing to prove -> ASK
+    return all(_under_planning(resolve_lexical(p, effective_cwd)) for p in staged)
 
 
 def _is_read_only(sub: str, args: list[str]) -> bool:
