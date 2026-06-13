@@ -109,7 +109,7 @@ def test_ssh_hard_reject_option_abstain(segment: str, ctx: Context) -> None:
 @pytest.mark.parametrize(
     "segment",
     [
-        "ssh host",       # no remote command
+        "ssh host",  # no remote command
         "ssh user@host",  # no remote command
     ],
 )
@@ -123,13 +123,13 @@ def test_ssh_bare_interactive_abstain(segment: str, ctx: Context) -> None:
 @pytest.mark.parametrize(
     "segment",
     [
-        "ssh host rm -rf /",             # inner unrecognized -> abstain
-        "ssh host tee /tmp/x",           # inner write
+        "ssh host rm -rf /",  # inner unrecognized -> abstain
+        "ssh host tee /tmp/x",  # inner write
         "ssh host journalctl --vacuum-size=1M",
         "ssh host journalctl -f",
         "ssh host journalctl --rotate",
         "ssh host journalctl --flush",
-        "ssh host journalctl --bogus",   # unaudited flag
+        "ssh host journalctl --bogus",  # unaudited flag
     ],
 )
 def test_ssh_remote_mutation_abstain(segment: str, ctx: Context) -> None:
