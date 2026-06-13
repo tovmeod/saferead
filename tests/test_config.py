@@ -501,3 +501,80 @@ def test_resolve_config_malformed_logging_global_fails_closed(tmp_path: Path) ->
     result = resolve_config(global_path, None)  # must not raise
     assert result.log_enabled is True
     assert result.log_path == _DEFAULT_AUDIT_PATH
+
+
+# --- PY-03 / PY-04: [python] allowlist config wiring (Phase 12 Plan 02) --------
+#
+# PY-03 wires two new [python] keys (allowed_methods, allowed_modules) through the
+# config layers with the SAME absent-vs-floor / REPLACE-on-present model as the git
+# keys. PY-04 is the DELIBERATE POLARITY INVERSION: the untrusted PROJECT layer
+# UNIONS (widens) the two python keys, while gated_subcommands stays narrow-only in
+# the very same merge. This is the FIRST project-widenable allow-affecting key — a
+# user-ratified accepted-risk cardinal override (D-05, ratified at project altitude,
+# commit 2719284). These tests pin both polarities holding simultaneously, plus the
+# floor-parity guard (config owns the single floor home; the analyzer references it).
+
+
+def test_python_global_replace_changes_effective_allowlist(tmp_path: Path) -> None:
+    """PY-03: a present global [python] REPLACES the floor for both python keys."""
+    path = _write(
+        tmp_path,
+        '[python]\nallowed_methods = ["custom_m"]\nallowed_modules = ["custom_mod"]\n',
+    )
+    cfg = load_layer(path)
+    assert cfg.python_allowed_methods == frozenset({"custom_m"})
+    assert cfg.python_allowed_modules == frozenset({"custom_mod"})
+
+
+def test_python_absent_key_falls_back_to_floor(tmp_path: Path) -> None:
+    """PY-03: an absent [python] key resolves to the built-in floor, never empty."""
+    from safe_read_hook.config import _BUILTIN_PY_METHODS, _BUILTIN_PY_MODULES
+
+    # A global that customizes only [git] — no [python] table at all.
+    path = _write(tmp_path, '[git]\nprotected_branches = ["release"]\n')
+    cfg = load_layer(path)
+    assert cfg.python_allowed_methods == _BUILTIN_PY_METHODS
+    assert cfg.python_allowed_modules == _BUILTIN_PY_MODULES
+    assert cfg.python_allowed_methods  # non-empty (never empty-by-omission)
+    assert cfg.python_allowed_modules
+
+
+def test_python_project_layer_widens_allowlist(tmp_path: Path) -> None:
+    """PY-04: a project [python] ADD UNIONS into (widens) the effective allowlist."""
+    base = builtin_config()
+    project_path = _write(tmp_path, '[python]\nallowed_modules = ["os"]\n')
+    result = merge(base, parse_layer(project_path))
+    assert "os" in result.python_allowed_modules
+    assert result.python_allowed_modules == base.python_allowed_modules | {"os"}
+
+
+def test_python_widen_while_gated_stays_narrow_same_merge(tmp_path: Path) -> None:
+    """PY-04 vs CR-01: in ONE merge, python WIDENS but gated stays narrow-only.
+
+    The deliberately OPPOSITE polarities must both hold in the same merge call:
+    the untrusted project widens the python allowlist (accepted risk) yet cannot
+    widen gated_subcommands (cardinal false-allow CR-01 stays closed).
+    """
+    base = builtin_config()
+    project_path = _write(
+        tmp_path,
+        '[python]\nallowed_modules = ["os"]\n[git]\ngated_subcommands = ["push"]\n',
+    )
+    result = merge(base, parse_layer(project_path))
+    # python: WIDENED (PY-04 accepted risk)
+    assert "os" in result.python_allowed_modules
+    # gated: NARROW-ONLY, unchanged (CR-01 — opposite polarity, same merge)
+    assert "push" not in result.gated_subcommands
+    assert result.gated_subcommands == base.gated_subcommands
+
+
+def test_python_floor_parity_no_drift() -> None:
+    """Drift guard: the analyzer floor == the config floor (single floor home)."""
+    from safe_read_hook.analyzers.python_skeleton import (
+        _FLOOR_METHODS,
+        _FLOOR_MODULES,
+    )
+    from safe_read_hook.config import _BUILTIN_PY_METHODS, _BUILTIN_PY_MODULES
+
+    assert _BUILTIN_PY_METHODS == _FLOOR_METHODS
+    assert _BUILTIN_PY_MODULES == _FLOOR_MODULES
