@@ -287,8 +287,6 @@ def _planning_only(
             "--reuse-message",
             "-c",
             "--reedit-message",
-            "-e",
-            "--edit",
         }
     )
 
@@ -303,6 +301,11 @@ def _planning_only(
             post_sep_tokens = args[i + 1 :]
             break
         if tok in _VALUE_FLAGS:
+            if i + 1 >= len(args):
+                # Value flag with no value (truncated) -> cannot prove -> ASK.
+                # Without this, i += 2 overshoots, leaving positionals empty and
+                # mis-routing to the staged-set probe (which could ALLOW).
+                return False
             i += 2  # skip flag and its value
             continue
         if tok.startswith("-"):

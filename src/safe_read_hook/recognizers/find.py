@@ -173,12 +173,12 @@ def recognize_find(segment: str, ctx: Context) -> Verdict | None:
 
     i = 0
     n = len(args)
-    # Track whether we have encountered any predicate / grouping token. Bare
-    # tokens BEFORE the first predicate are starting paths (REC-08 gated);
-    # value-predicate argument tokens are consumed by i += 2 and never reach
-    # the bare-operand branch below, so the gate is applied only to genuine
-    # starting path tokens.
-    seen_predicate = False
+    # Value-predicate argument tokens are consumed by i += 2 below and never
+    # reach the bare-operand branch, so EVERY bare token reaching that branch is
+    # a genuine path operand and is gated (REC-08, D-05). A path cannot legally
+    # follow a predicate in find ("paths must precede expression"), so there is
+    # no legitimate post-predicate bare path to skip — gating all bare operands
+    # closes the flag-predicate bypass (e.g. `find /allowed -empty /etc/shadow`).
     while i < n:
         tok = args[i]
 
@@ -188,35 +188,30 @@ def recognize_find(segment: str, ctx: Context) -> Verdict | None:
         if tok in _VALUE_PREDICATES or tok.startswith("-newer"):
             if i + 1 >= n:
                 return None  # malformed: predicate with no value
-            seen_predicate = True
             i += 2
             continue
 
         # A no-value flag predicate / stdout action.
         if tok in _FLAG_PREDICATES:
-            seen_predicate = True
             i += 1
             continue
 
         # A grouping / boolean operator.
         if tok in _GROUPING:
-            seen_predicate = True
             i += 1
             continue
 
         # A bare path operand (does not start with ``-``/``+``, not grouping).
-        # REC-08: gate ONLY starting paths (bare tokens BEFORE the first
-        # predicate). Tokens after a predicate are already consumed by i += 2
-        # (value-predicate values) so they never reach this branch.
+        # REC-08: gate EVERY bare path operand via _pathscope (D-05). Value-
+        # predicate values are consumed by i += 2 above, so only genuine path
+        # operands reach this branch.
         if not tok.startswith(("-", "+")):
-            if not seen_predicate:
-                # This is a starting path — gate it via _pathscope (D-05).
-                # SC#3: ssh-relative guard — abstain BEFORE resolving.
-                if ctx.read_scope == "ssh" and not os.path.isabs(tok):
-                    return None
-                resolved = resolve_lexical(tok, ctx.cwd)
-                if resolved is None or not under_any_root(resolved, roots):
-                    return None
+            # SC#3: ssh-relative guard — abstain BEFORE resolving.
+            if ctx.read_scope == "ssh" and not os.path.isabs(tok):
+                return None
+            resolved = resolve_lexical(tok, ctx.cwd)
+            if resolved is None or not under_any_root(resolved, roots):
+                return None
             i += 1
             continue
 

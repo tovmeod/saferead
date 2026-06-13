@@ -181,6 +181,27 @@ def test_find_root_abstain_relative_starting_path_outside_root() -> None:
     assert recognize_find("find . -name x", ctx) is None
 
 
+# --- root: a bare path AFTER a flag predicate is still gated (WR-01 bypass) ---
+
+
+def test_find_root_abstain_path_after_flag_predicate() -> None:
+    """find /allowed -empty /etc/shadow: post-flag-predicate path is gated -> abstain.
+
+    Regression for WR-01: -empty (a no-value flag predicate) must not open a hole
+    that lets a following out-of-root path escape the REC-08 gate.
+    """
+    ctx = _find_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    assert recognize_find("find /allowed -empty /etc/shadow", ctx) is None
+
+
+def test_find_root_allow_flag_predicate_no_extra_path() -> None:
+    """find /allowed -empty (no trailing path) with root={'/allowed'} -> allow."""
+    ctx = _find_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_find("find /allowed -empty", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
 # --- root: operand identification — -name VALUE not gated (D-05) ---
 
 

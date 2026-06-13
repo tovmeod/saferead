@@ -800,6 +800,21 @@ def test_git_planning_gated_bare_commit_probe_error_ask() -> None:
     assert verdict.tag == "git"
 
 
+def test_git_planning_gated_truncated_value_flag_ask_no_probe() -> None:
+    """WR-03: git commit -m (value flag, no value) on main -> ASK, probe not used.
+
+    A truncated value flag must not let i += 2 overshoot and mis-route to the
+    staged-set probe (which could ALLOW a .planning/-only staged set). It returns
+    False before the probe. Named with 'planning' + 'ask'.
+    """
+    spy: list[str | None] = []
+    ctx = _make_planning_ctx(branch="main", staged=[".planning/x.md"], staged_spy=spy)
+    verdict = recognize_git("git commit -m", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert spy == []  # probe not consulted for a truncated value flag
+
+
 # --- B1 cardinal: positional pathspec (no --) is NOT a bare commit ------------
 
 
