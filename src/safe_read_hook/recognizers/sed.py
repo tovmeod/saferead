@@ -29,9 +29,12 @@ routed through the shared ``redirect_tail_is_safe`` helper (the single ``/tmp``
 
 from __future__ import annotations
 
+import os.path
+
 from ..context import Context
 from ..tokenizer import tokenize
 from ..verdict import Verdict
+from ._pathscope import resolve_lexical, under_any_root
 from ._quoting import strip_one_quote_layer
 from .redirects import redirect_tail_is_safe
 
@@ -415,6 +418,28 @@ def recognize_sed(segment: str, ctx: Context) -> Verdict | None:
     # A trailing redirect among the file operands must pass the shared policy.
     if not redirect_tail_is_safe(file_operands):
         return None
+
+    # REC-08: gate each file_operand via _pathscope (D-05/D-06).
+    # The script is already excluded from file_operands (by the -e/positional
+    # split above), so it is NEVER gated here.  A no-file sed (stdin) has an
+    # empty file_operands list — the loop is a no-op and the read is unaffected
+    # (D-06: a no-path read is unaffected by read-roots).
+    roots = (
+        ctx.config.ssh_allowed_roots
+        if ctx.read_scope == "ssh"
+        else ctx.config.local_allowed_roots
+    )
+    for operand in file_operands:
+        # Skip redirect/control tokens — these were accepted by redirect_tail_is_safe
+        # and are not file paths (they bear ">" or "&").
+        if ">" in operand or "&" in operand:
+            continue
+        # SC#3: ssh-relative guard — abstain BEFORE resolving.
+        if ctx.read_scope == "ssh" and not os.path.isabs(operand):
+            return None
+        resolved = resolve_lexical(operand, ctx.cwd)
+        if resolved is None or not under_any_root(resolved, roots):
+            return None
 
     # EVERY script must classify clean (strip one quote layer first — the
     # tokenizer keeps a quoted script with its quotes).
