@@ -20,6 +20,7 @@ from safe_read_hook.config import (
     builtin_config,
     load_layer,
     merge,
+    parse_layer,
     resolve_config,
 )
 

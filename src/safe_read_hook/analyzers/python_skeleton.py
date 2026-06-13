@@ -36,6 +36,7 @@ Abstain-never-crash on any parse error or exception (D-15 / PKG-06).
 
 from __future__ import annotations
 
+from ..config import _BUILTIN_PY_METHODS, _BUILTIN_PY_MODULES
 from ..verdict import Verdict
 
 # --- The three locked allowlists (D-01 / D-02 / D-03's planner deliverable) --
@@ -62,41 +63,16 @@ _FLOOR_BUILTINS: frozenset[str] = frozenset(
 #: that the operation is read-only for the types that have it.
 #: EXPLICITLY EXCLUDED: write, append, update, add, sort, pop, insert, remove,
 #: clear, extend, discard, format, format_map.
-_FLOOR_METHODS: frozenset[str] = frozenset(
-    {
-        "upper",
-        "lower",
-        "strip",
-        "lstrip",
-        "rstrip",
-        "split",
-        "rsplit",
-        "join",
-        "get",
-        "items",
-        "keys",
-        "values",
-        "startswith",
-        "endswith",
-        "replace",
-        "find",
-        "index",
-        "count",
-        "title",
-        "capitalize",
-        "zfill",
-    }
-)
+#:
+#: The method + module floors live in ``config`` as the SINGLE floor home (PY-03,
+#: D-06): config wires the project-widenable ``[python]`` allowlists on top of
+#: these exact sets, so re-export them here (no import cycle — config imports only
+#: stdlib). ``test_python_floor_parity_no_drift`` pins this equality.
+_FLOOR_METHODS: frozenset[str] = _BUILTIN_PY_METHODS
 
 #: Module names admitted for import (D-02). Deliberately small and audited
-#: per-module; growth is example-by-example.
-_FLOOR_MODULES: frozenset[str] = frozenset(
-    {
-        "math",
-        "datetime",
-        "json",
-    }
-)
+#: per-module; growth is example-by-example. Single floor home in ``config``.
+_FLOOR_MODULES: frozenset[str] = _BUILTIN_PY_MODULES
 
 #: AST node TYPES permitted anywhere inside a read-only Python source
 #: (D-03's planner deliverable). Derived from the locked PY-01 allow corpus
@@ -168,7 +144,9 @@ _ALLOWED_NODE: frozenset[str] = frozenset(
 )
 
 
-def _call_admitted(node: object, allowed_builtins, allowed_methods, allowed_modules) -> bool:
+def _call_admitted(
+    node: object, allowed_builtins, allowed_methods, allowed_modules
+) -> bool:
     """A Call is admitted iff its callee is admitted.
 
     Callee rules:
@@ -271,7 +249,9 @@ def _import_admitted(node: object, allowed_modules) -> bool:
     return False
 
 
-def _walk_is_read_only(node: object, allowed_builtins, allowed_methods, allowed_modules) -> bool:
+def _walk_is_read_only(
+    node: object, allowed_builtins, allowed_methods, allowed_modules
+) -> bool:
     """One-pass allowlist walk; True only after the ENTIRE tree walks clean.
 
     Abstain (return False) on the FIRST violation. A per-node gate
@@ -327,7 +307,9 @@ def _walk_is_read_only(node: object, allowed_builtins, allowed_methods, allowed_
 
     # Descend into EVERY child (using ast.iter_child_nodes to avoid getattr).
     for child in ast.iter_child_nodes(node):
-        if not _walk_is_read_only(child, allowed_builtins, allowed_methods, allowed_modules):
+        if not _walk_is_read_only(
+            child, allowed_builtins, allowed_methods, allowed_modules
+        ):
             return False
 
     return True

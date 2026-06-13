@@ -48,6 +48,37 @@ from pathlib import Path
 _BUILTIN_PROTECTED = frozenset({"master", "main"})
 #: The built-in gated subcommands — the floor a broken/absent config falls to.
 _BUILTIN_GATED = frozenset({"add", "commit", "stash"})
+#: The built-in Python read-only method allowlist floor (PY-01/PY-03). This module
+#: is the SINGLE floor home — ``analyzers.python_skeleton`` imports these as
+#: ``_FLOOR_METHODS``/``_FLOOR_MODULES`` so the two can never drift
+#: (test_python_floor_parity_no_drift pins the equality).
+_BUILTIN_PY_METHODS = frozenset(
+    {
+        "upper",
+        "lower",
+        "strip",
+        "lstrip",
+        "rstrip",
+        "split",
+        "rsplit",
+        "join",
+        "get",
+        "items",
+        "keys",
+        "values",
+        "startswith",
+        "endswith",
+        "replace",
+        "find",
+        "index",
+        "count",
+        "title",
+        "capitalize",
+        "zfill",
+    }
+)
+#: The built-in Python safe-module import allowlist floor (PY-02/PY-03).
+_BUILTIN_PY_MODULES = frozenset({"math", "datetime", "json"})
 #: The built-in audit-log path — distinct from the error log (/tmp/claude-hook.log).
 _BUILTIN_AUDIT_PATH = Path("/tmp/claude-hook-audit.log")
 #: Audit logging is on by default (LOG-01).
@@ -71,6 +102,11 @@ class ResolvedConfig:
             compiling and inherit the built-in default.
         log_path: Audit-log file the per-decision JSON-lines records append to —
             distinct from the error log. DEFAULTED (see ``log_enabled``).
+        python_allowed_methods: Read-only Python method-name allowlist the Python
+            analyzer admits (PY-03). DEFAULTED to the built-in floor so existing
+            constructors keep compiling and never resolve to an empty allowlist.
+        python_allowed_modules: Safe-module import allowlist the Python analyzer
+            admits (PY-03). DEFAULTED (see ``python_allowed_methods``).
     """
 
     protected_branches: frozenset[str]
@@ -78,6 +114,8 @@ class ResolvedConfig:
     disabled_recognizers: frozenset[str]
     log_enabled: bool = _BUILTIN_LOG_ENABLED
     log_path: Path = field(default=_BUILTIN_AUDIT_PATH)
+    python_allowed_methods: frozenset[str] = field(default=_BUILTIN_PY_METHODS)
+    python_allowed_modules: frozenset[str] = field(default=_BUILTIN_PY_MODULES)
 
 
 def builtin_config() -> ResolvedConfig:
@@ -93,6 +131,8 @@ def builtin_config() -> ResolvedConfig:
         disabled_recognizers=frozenset(),
         log_enabled=_BUILTIN_LOG_ENABLED,
         log_path=_BUILTIN_AUDIT_PATH,
+        python_allowed_methods=_BUILTIN_PY_METHODS,
+        python_allowed_modules=_BUILTIN_PY_MODULES,
     )
 
 
@@ -111,6 +151,8 @@ class RawLayer:
     disabled_recognizers: frozenset[str] | None
     log_path: Path | None = None
     log_enabled: bool | None = None
+    python_allowed_methods: frozenset[str] | None = None
+    python_allowed_modules: frozenset[str] | None = None
 
 
 def _coerce_str_set(value: object, key: str) -> frozenset[str]:
@@ -171,6 +213,9 @@ def parse_layer(path: Path) -> RawLayer:
     log_table = data.get("logging", {})
     if not isinstance(log_table, dict):
         raise TypeError("[logging] must be a table")
+    py_table = data.get("python", {})
+    if not isinstance(py_table, dict):
+        raise TypeError("[python] must be a table")
 
     protected = (
         _coerce_str_set(git_table["protected_branches"], "protected_branches")
@@ -197,12 +242,24 @@ def parse_layer(path: Path) -> RawLayer:
         if "enabled" in log_table
         else None
     )
+    py_methods = (
+        _coerce_str_set(py_table["allowed_methods"], "[python] allowed_methods")
+        if "allowed_methods" in py_table
+        else None
+    )
+    py_modules = (
+        _coerce_str_set(py_table["allowed_modules"], "[python] allowed_modules")
+        if "allowed_modules" in py_table
+        else None
+    )
     return RawLayer(
         protected_branches=protected,
         gated_subcommands=gated,
         disabled_recognizers=disabled,
         log_path=log_path,
         log_enabled=log_enabled,
+        python_allowed_methods=py_methods,
+        python_allowed_modules=py_modules,
     )
 
 
@@ -239,6 +296,17 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
     that "tries" to drop ``main`` / un-gate ``commit`` / re-enable a recognizer has
     ZERO effect. Pure (no I/O).
 
+    PY-04 is the DELIBERATE EXCEPTION to the "project never widens an allow-set"
+    rule, scoped to the two ``python_allowed_*`` keys ONLY. These are the FIRST
+    project-WIDENABLE allow-affecting keys: ``python_allowed_methods``/``modules``
+    = ``base ∪ project`` (the same union shape as ``protected_branches``, but here
+    the union WIDENS the analyzer's allow-set rather than tightening an ASK). An
+    untrusted project ``[python] allowed_modules = ["os"]`` therefore reaches the
+    Python analyzer — a user-ratified accepted RCE risk (D-05, project altitude,
+    commit 2719284), the conscious inverse of ``gated_subcommands`` narrow-only
+    (CR-01). The two polarities coexist in one merge by design; a "denylist-floor
+    middle ground" is PROHIBITED (false-safe over an unbounded dangerous surface).
+
     LOGGING is the deliberate EXCEPTION to the union/narrow-only mechanism above.
     ``log_path``/``log_enabled`` use SCALAR COALESCE — a present project value FULLY
     overrides the base (``project value if not None else base``), NOT a union. This
@@ -258,6 +326,18 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
         if project.disabled_recognizers is not None
         else frozenset()
     )
+    # PY-04: the python allowlists are the FIRST project-WIDENABLE allow-affecting
+    # keys (absent project key = additive-identity empty, mirroring the union dims).
+    project_py_methods = (
+        project.python_allowed_methods
+        if project.python_allowed_methods is not None
+        else frozenset()
+    )
+    project_py_modules = (
+        project.python_allowed_modules
+        if project.python_allowed_modules is not None
+        else frozenset()
+    )
     log_path = project.log_path if project.log_path is not None else base.log_path
     log_enabled = (
         project.log_enabled if project.log_enabled is not None else base.log_enabled
@@ -272,6 +352,12 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
         disabled_recognizers=base.disabled_recognizers | project_disabled,
         log_path=log_path,
         log_enabled=log_enabled,
+        # PY-04: project WIDENS (deliberate; OPPOSITE of gated_subcommands
+        # narrow-only above — D-05/CR-01 override, user-ratified 2719284). The
+        # untrusted project layer MAY union into the python allowlists; this is
+        # the FIRST project-widenable allow-affecting key and an accepted RCE risk.
+        python_allowed_methods=base.python_allowed_methods | project_py_methods,
+        python_allowed_modules=base.python_allowed_modules | project_py_modules,
     )
 
 
@@ -305,11 +391,19 @@ def load_layer(path: Path) -> ResolvedConfig:
             if raw.disabled_recognizers is not None
             else frozenset()
         ),
-        log_path=(
-            raw.log_path if raw.log_path is not None else _BUILTIN_AUDIT_PATH
-        ),
+        log_path=(raw.log_path if raw.log_path is not None else _BUILTIN_AUDIT_PATH),
         log_enabled=(
             raw.log_enabled if raw.log_enabled is not None else _BUILTIN_LOG_ENABLED
+        ),
+        python_allowed_methods=(
+            raw.python_allowed_methods
+            if raw.python_allowed_methods is not None
+            else _BUILTIN_PY_METHODS
+        ),
+        python_allowed_modules=(
+            raw.python_allowed_modules
+            if raw.python_allowed_modules is not None
+            else _BUILTIN_PY_MODULES
         ),
     )
 
