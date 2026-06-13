@@ -159,3 +159,37 @@ def test_python_registered_and_callable() -> None:
     assert callable(analyzer)
     result = analyzer("42")
     assert result is None or isinstance(result, Verdict)
+
+
+# --- End-to-end live-reader path (the vertical slice proof) ------------------
+
+
+def test_python_fold_readonly_allows_end_to_end() -> None:
+    """END-TO-END: python -c "1+1" auto-allows through engine.fold.
+
+    This proves the vertical slice is live: the floor-bound Python analyzer
+    goes LIVE the moment this policy lands, and `python -c "<floor-readonly>"`
+    auto-allows end-to-end through `engine.fold` (tag `"python"`). This is the
+    MVP vertical-slice claim: the reader's `_SUBLANG_CMDS` dispatch goes LIVE.
+    """
+    from safe_read_hook.engine import fold, Context
+    from safe_read_hook.tokenizer import tokenize
+
+    segments = tokenize('python -c "1+1"').segments
+    verdict = fold(segments, Context(cwd="/x"))
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "python"
+
+
+def test_python_fold_dangerous_abstains_end_to_end() -> None:
+    """END-TO-END: python -c "import os" abstains through engine.fold.
+
+    Proves the analyzer's import gate works through the live path.
+    """
+    from safe_read_hook.engine import fold, Context
+    from safe_read_hook.tokenizer import tokenize
+
+    segments = tokenize('python -c "import os"').segments
+    verdict = fold(segments, Context(cwd="/x"))
+    assert verdict is None  # abstain
