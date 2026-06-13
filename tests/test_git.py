@@ -591,3 +591,338 @@ def test_git_config_injection_corpus_consistency(ctx: Context) -> None:
     explicit ``-c`` abstain, not coincidence.
     """
     assert recognize_git("git -c core.fsmonitor=touch status", ctx) is None
+
+
+# --- REC-09 .planning/ carve: explicit pathspecs → allow ----------------------
+#
+# Test-name contract (load-bearing): tests must include "planning" + "allow" or
+# "planning" + "ask" etc. to be selected by the documented -k filters.
+# Fake _staged_resolver injected via Context — NO real subprocess.
+
+
+def _make_planning_ctx(
+    branch: str = "main",
+    staged: list[str] | None = None,
+    staged_spy: list[str | None] | None = None,
+) -> Context:
+    """Build a Context with fake branch resolver + staged resolver for planning tests."""
+    _staged_calls: list[str | None] = staged_spy if staged_spy is not None else []
+
+    def _fake_staged(cwd: str | None) -> list[str] | None:
+        _staged_calls.append(cwd)
+        return staged
+
+    return Context(
+        cwd="/repo",
+        _resolver=lambda _c: branch,
+        _staged_resolver=_fake_staged,
+    )
+
+
+# --- planning allow: explicit pathspecs all under .planning/ ------------------
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git add .planning/x.md",
+        "git add .planning/STATE.md .planning/ROADMAP.md",
+        "git commit -m 'docs' -- .planning/a.md .planning/b.md",
+        "git commit -- .planning/a",
+        "git -C /repo add .planning/x.md",
+    ],
+)
+def test_git_planning_explicit_pathspecs_allow(segment: str) -> None:
+    """Explicit .planning/ pathspecs on a protected branch -> allow (REC-09).
+
+    All tokens are under .planning/ so the carve fires ALLOW before the protected
+    branch ASK. Named with 'planning' + 'allow' so -k filters select them.
+    """
+    ctx = _make_planning_ctx(branch="main")
+    verdict = recognize_git(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "git"
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git add .planning/STATE.md",
+        "git commit -- .planning/ROADMAP.md",
+    ],
+)
+def test_git_planning_allow_feature_branch_unchanged(segment: str) -> None:
+    """Feature-branch gated adds/commits still allow (pre-carve allow unchanged).
+
+    The carve only touches the protected-branch path; feature-branch allow
+    is byte-unchanged. Named with 'planning' + 'allow'.
+    """
+    ctx = _make_planning_ctx(branch="feature/x")
+    verdict = recognize_git(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "git"
+
+
+# --- planning ask: pathspecs outside .planning/ → ask -------------------------
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git add src/y.py",
+        "git add .planning/x.md src/y.py",
+        "git commit -- .planning/a src/b",
+        "git commit -- src/evil.py",
+    ],
+)
+def test_git_planning_mixed_or_outside_pathspecs_ask(segment: str) -> None:
+    """Pathspecs outside (or mixed with) .planning/ on a protected branch -> ask.
+
+    The carve does NOT fire; the existing protected-branch ASK is returned.
+    Named with 'planning' + 'ask'.
+    """
+    ctx = _make_planning_ctx(branch="main")
+    verdict = recognize_git(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert verdict.tag == "git"
+
+
+# --- planning ask: stage-all forms → ask --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git add -A",
+        "git add --all",
+        "git add .",
+        "git commit -a",
+        "git commit --all",
+        "git commit -a -m 'msg'",
+    ],
+)
+def test_git_planning_stage_all_ask(segment: str) -> None:
+    """Stage-all forms (add -A / add . / commit -a) on a protected branch -> ask.
+
+    Cannot prove the affected set is .planning/-only, so prove-or-ASK -> ASK.
+    Named with 'planning' + 'ask'.
+    """
+    ctx = _make_planning_ctx(branch="main")
+    verdict = recognize_git(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert verdict.tag == "git"
+
+
+# --- planning ask: pathspec escape → ask --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "git add .planning/../etc/x",
+        "git add /abs/path/x.md",
+        "git commit -- .planning/../evil",
+    ],
+)
+def test_git_planning_escape_ask(segment: str) -> None:
+    """Pathspec escapes (.planning/../x, absolute) on a protected branch -> ask.
+
+    Normalize lexically: a .. escape resolves outside .planning/ -> False -> ASK.
+    Named with 'planning' + 'escape' + 'ask'.
+    """
+    ctx = _make_planning_ctx(branch="main")
+    verdict = recognize_git(segment, ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert verdict.tag == "git"
+
+
+# --- planning ask: stash NOT carved -------------------------------------------
+
+
+def test_git_planning_stash_not_carved_ask() -> None:
+    """Bare git stash on a protected branch is NOT carved -> still ASK (D-07).
+
+    The .planning/ carve is ONLY for sub in ('add', 'commit'); stash remains
+    unmodified (the existing gated ASK). Named with 'planning' + 'stash'.
+    """
+    ctx = _make_planning_ctx(branch="main")
+    verdict = recognize_git("git stash", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert verdict.tag == "git"
+
+
+# --- planning gated: bare-commit probe (no positionals, no --) ----------------
+
+
+def test_git_planning_gated_bare_commit_all_planning_allow() -> None:
+    """Bare commit on protected branch: probe returns all-.planning/ paths -> allow.
+
+    A genuinely-bare commit (no positionals, no --) consults _staged_resolver;
+    every returned path under .planning/ -> ALLOW. Named with 'planning' + 'gated'.
+    """
+    ctx = _make_planning_ctx(branch="main", staged=[".planning/STATE.md", ".planning/ROADMAP.md"])
+    verdict = recognize_git("git commit -m 'docs'", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    assert verdict.tag == "git"
+
+
+def test_git_planning_gated_bare_commit_mixed_staged_ask() -> None:
+    """Bare commit on protected branch: probe returns mixed paths -> ask.
+
+    Named with 'planning' + 'gated'.
+    """
+    ctx = _make_planning_ctx(branch="main", staged=[".planning/STATE.md", "src/y.py"])
+    verdict = recognize_git("git commit -m 'mixed'", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert verdict.tag == "git"
+
+
+def test_git_planning_gated_bare_commit_probe_error_ask() -> None:
+    """Bare commit on protected branch: probe returns None (error) -> ask.
+
+    _staged_resolver returns None -> cannot prove .planning/-only -> ASK.
+    Named with 'planning' + 'gated'.
+    """
+    ctx = _make_planning_ctx(branch="main", staged=None)
+    verdict = recognize_git("git commit -m 'err'", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    assert verdict.tag == "git"
+
+
+# --- B1 cardinal: positional pathspec (no --) is NOT a bare commit ------------
+
+
+def test_git_planning_ask_positional_pathspec_no_separator_is_not_bare() -> None:
+    """B1 cardinal: git commit src/evil.py (no --) on main -> ASK.
+
+    'src/evil.py' is a positional pathspec without a -- separator. It is collected
+    as an explicit pathspec (NOT a bare commit) and does NOT route to the
+    staged-set probe. Even when the injected _staged_resolver returns a .planning/-
+    only staged set, the positional pathspec is outside .planning/ -> ASK.
+
+    Named with 'planning' + 'ask' so -k 'planning and ask' selects it.
+    """
+    spy: list[str | None] = []
+    ctx = Context(
+        cwd="/repo",
+        _resolver=lambda _c: "main",
+        _staged_resolver=lambda cwd: spy.append(cwd) or [".planning/x.md"],
+    )
+    verdict = recognize_git("git commit src/evil.py", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+    # The probe MUST NOT have been consulted (B2 contract: positional present).
+    assert spy == [], f"_staged_resolver was called (B2 violation): spy={spy!r}"
+
+
+def test_git_planning_ask_planning_positional_pathspec_no_separator_allow() -> None:
+    """B1 + carve: git commit .planning/x.md (positional, no --) -> ALLOW.
+
+    A positional .planning/ pathspec without -- is proven from the pathspec
+    directly (not via the probe). Named with 'planning' + 'allow'.
+    """
+    spy: list[str | None] = []
+    ctx = Context(
+        cwd="/repo",
+        _resolver=lambda _c: "main",
+        _staged_resolver=lambda cwd: spy.append(cwd) or ["src/evil.py"],
+    )
+    verdict = recognize_git("git commit .planning/x.md", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+    # The probe MUST NOT have been consulted (positional present -> no probe).
+    assert spy == [], f"_staged_resolver was called (B2 violation): spy={spy!r}"
+
+
+# --- B2 contract: probe NOT called when any positional present ----------------
+
+
+def test_git_planning_gated_probe_not_called_when_positional_present() -> None:
+    """B2: _staged_resolver NOT called when any positional pathspec is present.
+
+    Tests both post-'--' positional and bare positional. The spy raises on call
+    to make the B2 violation loud. Named with 'planning' + 'gated'.
+    """
+    def _spy_staged(_cwd: str | None) -> list[str] | None:
+        raise AssertionError("_staged_resolver called with a positional pathspec present (B2 violation)")
+
+    # post-'--' positional -> proven from pathspec, probe must not fire
+    ctx_sep = Context(
+        cwd="/repo",
+        _resolver=lambda _c: "main",
+        _staged_resolver=_spy_staged,
+    )
+    v_sep = recognize_git("git commit -- .planning/a.md", ctx_sep)
+    assert v_sep is not None and v_sep.decision == "allow"
+
+    # bare positional (no --) outside .planning/ -> ASK, probe must not fire
+    ctx_pos = Context(
+        cwd="/repo",
+        _resolver=lambda _c: "main",
+        _staged_resolver=_spy_staged,
+    )
+    v_pos = recognize_git("git commit src/x.py", ctx_pos)
+    assert v_pos is not None and v_pos.decision == "ask"
+
+
+# --- planning hardcoded: project config cannot widen the .planning/ gate ------
+
+
+def test_git_planning_hardcoded_project_config_cannot_widen() -> None:
+    """D-09: .planning/ is hardcoded; project config cannot make it wider.
+
+    No matter what a project config sets, the only auto-allowed path prefix for
+    bare-commit probes and explicit pathspecs is the hardcoded '.planning/' —
+    never a config-sourced value. This pins D-09 against the narrow-only-gated-
+    union false-allow pattern. Named with 'planning' + 'hardcoded'.
+    """
+    # A project config that injects a different 'allowed' key (e.g. a custom path)
+    # cannot affect the .planning/ hardcoded check. We verify by injecting a
+    # staged resolver that returns a path that looks almost like .planning/ but
+    # normalizes outside it, and confirm it ASKs.
+    ctx = Context(
+        cwd="/repo",
+        _resolver=lambda _c: "main",
+        # staged returns '.planningEVIL/x' — should NOT match .planning/
+        _staged_resolver=lambda _cwd: [".planningEVIL/x.md"],
+    )
+    verdict = recognize_git("git commit -m 'msg'", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+
+
+def test_git_planning_hardcoded_component_boundary_in_pathspec() -> None:
+    """D-09 + component-boundary: '.planningEVIL/x' pathspec must NOT match .planning/.
+
+    The component-boundary guard prevents startswith('.planning') from matching
+    '.planningEVIL'. Named with 'planning' + 'hardcoded'.
+    """
+    ctx = _make_planning_ctx(branch="main")
+    verdict = recognize_git("git add .planningEVIL/x.md", ctx)
+    assert verdict is not None
+    assert verdict.decision == "ask"
+
+
+# --- planning: git commit -m 'msg' must NOT treat 'msg' as a pathspec ---------
+
+
+def test_git_planning_gated_message_flag_value_not_treated_as_pathspec() -> None:
+    """T-14-15: git commit -m 'msg' on protected branch with .planning/ staged -> allow.
+
+    'msg' is the value of -m and must be skipped (not treated as a pathspec).
+    The commit is genuinely bare (zero positionals after skipping -m + value),
+    so the staged-set probe is consulted. Named with 'planning' + 'gated'.
+    """
+    ctx = _make_planning_ctx(branch="main", staged=[".planning/x.md"])
+    verdict = recognize_git("git commit -m 'msg'", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
