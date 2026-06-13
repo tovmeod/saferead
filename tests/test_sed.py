@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import pytest
 
+from safe_read_hook.config import ResolvedConfig
 from safe_read_hook.context import Context
 from safe_read_hook.engine import fold
 from safe_read_hook.recognizers.sed import recognize_sed
@@ -212,5 +213,136 @@ def test_sed_inplace_corpus_flip_through_fold_abstain(ctx: Context) -> None:
 
 def test_sed_readonly_allow_through_fold(ctx: Context) -> None:
     verdict = fold(["sed 's/a/b/' f"], ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# ---------------------------------------------------------------------------
+# REC-08: read-root gating in sed.py (14-02)
+# Test names contain "root" so -k "root" selects them all.
+# ---------------------------------------------------------------------------
+
+
+def _sed_root_ctx(roots: frozenset[str] | None, cwd: str = "/work") -> Context:
+    """Return a Context with local_allowed_roots set for root-gate tests."""
+    return Context(
+        cwd=cwd,
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            local_allowed_roots=roots,
+        ),
+    )
+
+
+# --- root: file operand under allowed root -> allow ---
+
+
+def test_sed_root_allow_file_operand_under_root() -> None:
+    """sed -n p /allowed/f with root={'/allowed'} -> allow."""
+    ctx = _sed_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_sed("sed -n p /allowed/f", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: file operand outside any root -> abstain ---
+
+
+def test_sed_root_abstain_file_operand_outside_root() -> None:
+    """sed -n p /etc/passwd with root={'/allowed'} -> abstain."""
+    ctx = _sed_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    assert recognize_sed("sed -n p /etc/passwd", ctx) is None
+
+
+# --- root: unset (None) root list -> allow-any (no regression, D-02) ---
+
+
+def test_sed_root_unset_list_allows_any_file() -> None:
+    """Unset roots (None) -> allow-any: sed -n p /etc/passwd still allows."""
+    ctx = _sed_root_ctx(None, cwd="/work")
+    verdict = recognize_sed("sed -n p /etc/passwd", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: operand identification — sed SCRIPT is NOT gated as a path ---
+
+
+def test_sed_root_operand_script_not_gated_as_path() -> None:
+    """The sed script (s/a/b/) is NEVER treated as a path operand.
+
+    D-05: the script is excluded from file_operands before the gate runs.
+    A file under root with a script -> allow.
+    """
+    ctx = _sed_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_sed("sed 's/a/b/' /allowed/f", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: no file operand (reads stdin) with set root -> allow (D-06) ---
+
+
+def test_sed_root_no_file_operand_stdin_allow() -> None:
+    """sed -n p (no file, reads stdin) with set root -> allow (D-06 no-path unaffected)."""
+    ctx = _sed_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_sed("sed -n p", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: multiple file_operands all under root -> allow ---
+
+
+def test_sed_root_multiple_file_operands_all_under_root_allow() -> None:
+    """Multiple file_operands all under root -> allow."""
+    ctx = _sed_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_sed("sed -e 's/a/b/' /allowed/f1 /allowed/f2", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: multiple file_operands — any one outside root -> abstain ---
+
+
+def test_sed_root_one_file_operand_outside_root_abstains() -> None:
+    """Multiple file_operands but one outside root -> abstain."""
+    ctx = _sed_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    assert recognize_sed("sed -e 's/a/b/' /allowed/f1 /etc/passwd", ctx) is None
+
+
+# --- root: ssh scope — relative file operand abstains pre-resolution (SC#3) ---
+
+
+def test_sed_root_scope_ssh_relative_file_operand_abstains() -> None:
+    """With read_scope='ssh', a RELATIVE file operand abstains before resolution (SC#3)."""
+    ctx = Context(
+        cwd="/allowed",
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            ssh_allowed_roots=frozenset({"/allowed"}),
+        ),
+        read_scope="ssh",
+    )
+    assert recognize_sed("sed -n p rel/file", ctx) is None
+
+
+def test_sed_root_scope_ssh_absolute_file_under_root_allows() -> None:
+    """With read_scope='ssh', an absolute file operand under ssh_allowed_roots -> allow."""
+    ctx = Context(
+        cwd="/work",
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            ssh_allowed_roots=frozenset({"/allowed"}),
+        ),
+        read_scope="ssh",
+    )
+    verdict = recognize_sed("sed -n p /allowed/f", ctx)
     assert verdict is not None
     assert verdict.decision == "allow"
