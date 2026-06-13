@@ -18,14 +18,15 @@ Two surfaces:
 
 Test-name contract (load-bearing, MEMORY.md silent-skip lesson, D8-09): the
 ``-k`` filter selects on substrings ``ssh`` + ``allow``/``abstain`` (+
-``fold``/``trust_laundering``). A test whose name misses these substrings is
-silently NOT run.
+``fold``/``trust_laundering``). REC-08 ssh-scope tests use ``root``/``scope``
+so ``-k "root or scope"`` selects them (14-03 scope-wiring tests).
 """
 
 from __future__ import annotations
 
 import pytest
 
+from safe_read_hook.config import ResolvedConfig, builtin_config
 from safe_read_hook.context import Context
 from safe_read_hook.engine import fold
 from safe_read_hook.recognizers.ssh import recognize_ssh
@@ -197,3 +198,173 @@ def test_journalctl_local_allow_through_fold(ctx: Context) -> None:
     assert verdict is not None
     assert verdict.decision == "allow"
     assert verdict.tag == "journalctl"
+
+
+# --- REC-08 / 14-03: ssh-scope wiring + ssh_allowed_roots gate -------------
+#
+# These tests verify the 14-03 change: _fold_readonly_ssh must pass a derived
+# Context with read_scope="ssh" so the inner reader/find/sed gate consults
+# ssh_allowed_roots (not local_allowed_roots) and abstains on relative remote
+# operands before resolution (SC#3 / T-14-08 / T-14-09 / T-14-10).
+#
+# Test-name contract: names contain "root" and/or "scope" so
+#   pytest -k "root or scope"
+# selects the new REC-08 scope tests.
+
+
+def _ssh_cfg(
+    *,
+    ssh_roots: frozenset[str] | None,
+    local_roots: frozenset[str] | None = None,
+) -> ResolvedConfig:
+    """Return a ResolvedConfig with the given root lists; other fields = builtin."""
+    base = builtin_config()
+    return ResolvedConfig(
+        protected_branches=base.protected_branches,
+        gated_subcommands=base.gated_subcommands,
+        disabled_recognizers=base.disabled_recognizers,
+        log_enabled=base.log_enabled,
+        log_path=base.log_path,
+        python_allowed_methods=base.python_allowed_methods,
+        python_allowed_modules=base.python_allowed_modules,
+        local_allowed_roots=local_roots,
+        ssh_allowed_roots=ssh_roots,
+    )
+
+
+# T-14-09: absolute remote path under ssh_allowed_roots -> allow
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "ssh host cat /remote/allowed/file.log",
+        "ssh host ls /remote/allowed",
+        "ssh host find /remote/allowed -name '*.log'",
+        "ssh host grep foo /remote/allowed/file.log",
+        "ssh host sed -n '1p' /remote/allowed/file.log",
+    ],
+)
+def test_ssh_root_scope_absolute_under_ssh_root_allow(segment: str) -> None:
+    """Absolute remote path under ssh_allowed_roots allows (T-14-09)."""
+    cfg = _ssh_cfg(ssh_roots=frozenset({"/remote/allowed"}))
+    ctx = Context(cwd="/local/cwd", config=cfg)
+    verdict = recognize_ssh(segment, ctx)
+    assert verdict is not None, f"Expected allow; got abstain for: {segment!r}"
+    assert verdict.decision == "allow"
+    assert verdict.tag == "ssh"
+
+
+# T-14-09: absolute remote path NOT under ssh_allowed_roots -> abstain
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "ssh host cat /etc/passwd",
+        "ssh host ls /var/log",
+        "ssh host find /home/user -name '*.conf'",
+    ],
+)
+def test_ssh_root_scope_absolute_outside_ssh_root_abstain(segment: str) -> None:
+    """Absolute remote path outside ssh_allowed_roots abstains (T-14-09)."""
+    cfg = _ssh_cfg(ssh_roots=frozenset({"/remote/allowed"}))
+    ctx = Context(cwd="/local/cwd", config=cfg)
+    assert recognize_ssh(segment, ctx) is None, (
+        f"Expected abstain (outside ssh root); got allow for: {segment!r}"
+    )
+
+
+# T-14-08: remote RELATIVE path operand -> ABSTAIN (SC#3, login dir unknowable)
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "ssh host cat relative/file.log",
+        "ssh host cat some/path/to/file",
+        "ssh host ls logs",
+        "ssh host find . -name '*.log'",
+        "ssh host grep foo relative/file",
+        "ssh host sed -n '1p' relative/file",
+    ],
+)
+def test_ssh_root_scope_relative_remote_operand_abstain(segment: str) -> None:
+    """Remote relative path abstains before resolution (T-14-08 / SC#3).
+
+    The remote login dir is unknowable; local cwd resolution would be wrong.
+    """
+    # Even a permissive ssh root list must NOT allow relative remote operands.
+    cfg = _ssh_cfg(ssh_roots=None)  # None = allow-any; still must abstain on relative
+    ctx = Context(cwd="/local/cwd", config=cfg)
+    assert recognize_ssh(segment, ctx) is None, (
+        f"Expected abstain (relative remote operand); got allow for: {segment!r}"
+    )
+
+
+# T-14-09: LOCAL list covers the path, SSH list does NOT -> abstain
+# Proves the re-fold consults ssh_allowed_roots, not local_allowed_roots.
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "ssh host cat /etc/passwd",
+        "ssh host ls /etc",
+        "ssh host cat /var/log/syslog",
+    ],
+)
+def test_ssh_root_scope_local_root_not_consulted_abstain(segment: str) -> None:
+    """Local root covering the path does NOT allow under ssh scope (T-14-09)."""
+    # /etc and /var are under local_roots but NOT under ssh_roots.
+    cfg = _ssh_cfg(
+        local_roots=frozenset({"/etc", "/var"}),
+        ssh_roots=frozenset({"/remote/allowed"}),
+    )
+    ctx = Context(cwd="/local/cwd", config=cfg)
+    assert recognize_ssh(segment, ctx) is None, (
+        f"Expected abstain (local root consulted instead of ssh root); "
+        f"got allow for: {segment!r}"
+    )
+
+
+# T-14-10: ssh scope does NOT leak to the outer (non-ssh) local segment
+def test_ssh_scope_does_not_leak_to_outer_local_segment() -> None:
+    """read_scope='ssh' set inside _fold_readonly_ssh must not affect the outer ctx."""
+    # After recognize_ssh returns, a follow-up local read with local_allowed_roots
+    # should still use local_allowed_roots (not ssh_allowed_roots).
+    from safe_read_hook.recognizers.reader import recognize_reader
+
+    cfg = _ssh_cfg(
+        local_roots=frozenset({"/local/allowed"}),
+        ssh_roots=frozenset({"/remote/allowed"}),
+    )
+    outer_ctx = Context(cwd="/local/cwd", config=cfg)
+
+    # First: run ssh recognition (this must not mutate outer_ctx.read_scope).
+    _ = recognize_ssh("ssh host cat /remote/allowed/file", outer_ctx)
+
+    # Now verify outer_ctx.read_scope is still "local" (not "ssh").
+    assert outer_ctx.read_scope == "local", (
+        f"ssh re-fold leaked read_scope='ssh' into outer ctx; "
+        f"outer_ctx.read_scope={outer_ctx.read_scope!r}"
+    )
+
+    # Also verify: a local read of /local/allowed/f still allows with the outer ctx.
+    verdict = recognize_reader("cat /local/allowed/file.txt", outer_ctx)
+    assert verdict is not None, (
+        "Local read under local root should allow after ssh re-fold"
+    )
+    assert verdict.decision == "allow"
+
+
+# D-02: unset ssh_allowed_roots -> ssh absolute path allows (no regression)
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "ssh host cat /any/absolute/path",
+        "ssh host ls /etc",
+        "ssh host journalctl -u nginx",
+    ],
+)
+def test_ssh_root_scope_unset_ssh_roots_allow(segment: str) -> None:
+    """Unset ssh_allowed_roots = allow-any for absolute paths (D-02 no regression)."""
+    cfg = _ssh_cfg(ssh_roots=None)  # None = allow-any
+    ctx = Context(cwd="/local/cwd", config=cfg)
+    verdict = recognize_ssh(segment, ctx)
+    assert verdict is not None, (
+        f"Expected allow (unset ssh_roots = allow-any); got abstain for: {segment!r}"
+    )
+    assert verdict.decision == "allow"
