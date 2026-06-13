@@ -91,15 +91,31 @@ def _fold_readonly_ssh(segments: list[str], ctx: Context) -> Verdict | None:
     segment is unrecognized by every allowed recognizer, return ``None``; (2)
     precedence ``ask`` > ``allow``, returning a literal input Verdict.
 
+    REC-08 / 14-03: A DERIVED Context with ``read_scope="ssh"`` is passed to the
+    inner recognizers so they consult ``ssh_allowed_roots`` (not
+    ``local_allowed_roots``) and abstain on relative remote operands before
+    resolution (SC#3 / T-14-08 / T-14-09). ``ctx`` (the OUTER context) is NOT
+    mutated; the derived clone is local to this fold so the ssh scope cannot leak
+    back to the outer segment (T-14-10). ``recognize_git`` and
+    ``recognize_journalctl`` are unaffected — they take no REC-08 path operands.
+
     Lazy imports keep the existing circular-import discipline (``recognizers/
     __init__`` → ``ssh`` → siblings → ``engine`` → ``recognizers/__init__``);
     importing at call time avoids any import-order coupling.
     """
+    from dataclasses import replace
+
     from .find import recognize_find
     from .git import recognize_git
     from .journalctl import recognize_journalctl
     from .reader import recognize_reader
     from .sed import recognize_sed
+
+    # REC-08: derive a scoped clone so the inner recognizers consult
+    # ssh_allowed_roots and SC#3-abstain on relative remote operands.
+    # ``replace`` from dataclasses creates a shallow copy with only the
+    # named field changed — ctx itself (the outer Context) is NOT mutated.
+    ssh_ctx = replace(ctx, read_scope="ssh")
 
     readonly = (
         recognize_reader,
@@ -113,7 +129,7 @@ def _fold_readonly_ssh(segments: list[str], ctx: Context) -> Verdict | None:
     for segment in segments:
         match: Verdict | None = None
         for recognizer in readonly:
-            match = recognizer(segment, ctx)
+            match = recognizer(segment, ssh_ctx)
             if match is not None:
                 break
         if match is None:
