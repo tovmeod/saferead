@@ -65,6 +65,8 @@ def ctx() -> Context:
         "journalctl --since yesterday",  # time range
         "journalctl --until '2026-01-01'",
         "journalctl -u nginx -n 100 --no-pager",  # combined
+        "journalctl -n100",  # glued VALUE short flag (-n + value) still admitted
+        "journalctl -unginx",  # glued VALUE short flag (-u + value) still admitted
     ],
 )
 def test_journalctl_readonly_allow(segment: str, ctx: Context) -> None:
@@ -89,6 +91,9 @@ def test_journalctl_readonly_allow(segment: str, ctx: Context) -> None:
         "journalctl --flush",  # D-05: mutation
         "journalctl --bogus",  # unaudited -> abstain by omission
         "journalctl -z",  # unknown short -> abstain
+        "journalctl -ef",  # CR-01: POSIX bundle (-e + -f); -f is a D-05 reject
+        "journalctl -kf",  # CR-01: bundle hides --follow behind boolean head -k
+        "journalctl -rf",  # CR-01: bundle hides --follow behind boolean head -r
     ],
 )
 def test_journalctl_readonly_abstain(segment: str, ctx: Context) -> None:

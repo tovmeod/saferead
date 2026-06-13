@@ -74,12 +74,14 @@ _TAG_CASES: list[tuple[str, str]] = [
     ("adb", "adb devices"),
     ("pytest", "pytest tests/"),
     ("gradle", "gradle tasks"),
+    ("journalctl", "journalctl -u nginx"),
+    ("ssh", "ssh host journalctl -u nginx"),
 ]
 
 
 @pytest.mark.parametrize(("tag", "command"), _TAG_CASES)
 def test_disabling_each_tag_abstains_its_recognizer(tag: str, command: str) -> None:
-    """Disabling each of the 7 tags makes its representative case abstain."""
+    """Disabling each of the 9 tags makes its representative case abstain."""
     enabled = _ctx(disabled=frozenset())
     assert fold([command], enabled) is not None, f"{tag}: case must resolve enabled"
 
@@ -95,7 +97,7 @@ def test_disable_is_monotonic_toward_more_prompts() -> None:
 
 
 def test_registry_entries_are_callable_guards() -> None:
-    """REGISTRY holds 9 callable guards (closures, not bare recognizer functions).
+    """REGISTRY holds 11 callable guards (closures, not bare recognizer functions).
 
     Re-expresses the old element-identity assertion as a behavior/shape check:
     after wrapping, REGISTRY entries are guard closures, so identity membership

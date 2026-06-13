@@ -75,23 +75,38 @@ _JOURNALCTL_FLAGS: frozenset[str] = frozenset(
 )
 
 
+#: Short flags that CONSUME a value, so a glued ``-Xvalue`` token is the flag
+#: plus its value (``-n100`` / ``-unginx`` / ``-ojson``). ONLY these admit the
+#: glued 2-char-head match. Boolean short flags (``-e``/``-k``/``-r``) must NOT:
+#: ``-ef`` is a POSIX short-flag BUNDLE (``--pager-end --follow``) and
+#: ``--follow`` is a D-05 hard reject — admitting a glued boolean head would
+#: launder a rejected/unaudited bundled flag into an allow (cardinal false-allow,
+#: 13-REVIEW CR-01). A glued boolean head therefore abstains by omission.
+_JOURNALCTL_VALUE_SHORT: frozenset[str] = frozenset(
+    {"-u", "-n", "-p", "-o", "-g", "-b"}
+)
+
+
 def _flag_is_audited(tok: str, allowed: frozenset[str]) -> bool:
     """Return True if option token ``tok`` is on the read-only allowlist.
 
     Handles all three token shapes (MEMORY.md flag-audit blindspot): split exact
     (``-r``), long ``--flag=value`` (split on ``=`` before membership), and a
-    glued short flag (match its 2-char head, e.g. ``-unginx`` -> head ``-u``).
-    Any flag not exactly named on the allowlist returns False -> abstain by
-    omission.
+    glued VALUE short flag (match its 2-char head only when that head consumes a
+    value, e.g. ``-unginx`` -> head ``-u``). A glued boolean head (``-ef``) is a
+    POSIX bundle and abstains (13-REVIEW CR-01). Any flag not exactly named on
+    the allowlist returns False -> abstain by omission.
     """
     if tok.startswith("--"):
         # Long flag: strip the ``=value`` tail before membership.
         name = tok.split("=", 1)[0]
         return name in allowed
-    # Short flag: exact match, or a glued short flag whose 2-char head is admitted.
+    # Short flag: exact match, or a glued VALUE short flag whose 2-char head is a
+    # value-consuming flag (the remainder is that flag's value). A glued boolean
+    # head is a bundle that could smuggle a rejected flag -> abstain by omission.
     if tok in allowed:
         return True
-    return len(tok) > 2 and tok[:2] in allowed
+    return len(tok) > 2 and tok[:2] in _JOURNALCTL_VALUE_SHORT
 
 
 def recognize_journalctl(segment: str, ctx: Context) -> Verdict | None:
