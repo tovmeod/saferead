@@ -28,6 +28,7 @@ from .git import recognize_git
 from .gradle import recognize_gradle
 from .psql import recognize_psql
 from .pytest_runner import recognize_pytest
+from .python import recognize_python
 from .reader import recognize_reader
 from .sed import recognize_sed
 
@@ -73,4 +74,5 @@ REGISTRY: list[Recognizer] = [
     _guarded("pytest", recognize_pytest),
     _guarded("gradle", recognize_gradle),
     _guarded("psql", recognize_psql),
+    _guarded("python", recognize_python),
 ]

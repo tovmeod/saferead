@@ -41,9 +41,7 @@ def ctx() -> Context:
 def ctx_widened() -> Context:
     """A ctx whose project-widened config admits ``os`` (PY-04 path)."""
     base = builtin_config()
-    widened = replace(
-        base, python_allowed_modules=base.python_allowed_modules | {"os"}
-    )
+    widened = replace(base, python_allowed_modules=base.python_allowed_modules | {"os"})
     return Context(cwd="/x", config=widened)
 
 
