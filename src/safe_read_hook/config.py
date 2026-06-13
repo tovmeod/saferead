@@ -83,6 +83,11 @@ _BUILTIN_PY_MODULES = frozenset({"math", "datetime", "json"})
 _BUILTIN_AUDIT_PATH = Path("/tmp/claude-hook-audit.log")
 #: Audit logging is on by default (LOG-01).
 _BUILTIN_LOG_ENABLED = True
+#: The built-in [read] local/ssh allowed-root lists (REC-08 D-02/D-03).
+#: Floor is None = allow-any (POLARITY INVERSION vs [python]: the [python] floor
+#: is a populated frozenset; the [read] floor is None = unset = allow-any).
+_BUILTIN_READ_LOCAL_ROOTS: frozenset[str] | None = None
+_BUILTIN_READ_SSH_ROOTS: frozenset[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +112,13 @@ class ResolvedConfig:
             constructors keep compiling and never resolve to an empty allowlist.
         python_allowed_modules: Safe-module import allowlist the Python analyzer
             admits (PY-03). DEFAULTED (see ``python_allowed_methods``).
+        local_allowed_roots: Read-path scope for local commands (REC-08 D-02/D-03).
+            ``None`` = allow-any (built-in floor); a ``frozenset`` restricts reads
+            to paths under those roots. DEFAULTED to ``None`` so existing
+            constructors keep compiling and inherit the allow-any behaviour.
+        ssh_allowed_roots: Read-path scope for remote paths inside ``ssh`` re-folds
+            (REC-08). Same ``None``=allow-any semantics. DEFAULTED (see
+            ``local_allowed_roots``).
     """
 
     protected_branches: frozenset[str]
@@ -116,6 +128,11 @@ class ResolvedConfig:
     log_path: Path = field(default=_BUILTIN_AUDIT_PATH)
     python_allowed_methods: frozenset[str] = field(default=_BUILTIN_PY_METHODS)
     python_allowed_modules: frozenset[str] = field(default=_BUILTIN_PY_MODULES)
+    # REC-08: read-root lists — floor=None=allow-any (D-02/D-03, POLARITY INVERSION
+    # vs [python] whose floor is a populated frozenset).  DEFAULTED so all existing
+    # constructors keep compiling and inherit the allow-any behaviour.
+    local_allowed_roots: frozenset[str] | None = None
+    ssh_allowed_roots: frozenset[str] | None = None
 
 
 def builtin_config() -> ResolvedConfig:
@@ -133,6 +150,8 @@ def builtin_config() -> ResolvedConfig:
         log_path=_BUILTIN_AUDIT_PATH,
         python_allowed_methods=_BUILTIN_PY_METHODS,
         python_allowed_modules=_BUILTIN_PY_MODULES,
+        local_allowed_roots=_BUILTIN_READ_LOCAL_ROOTS,
+        ssh_allowed_roots=_BUILTIN_READ_SSH_ROOTS,
     )
 
 
@@ -153,6 +172,9 @@ class RawLayer:
     log_enabled: bool | None = None
     python_allowed_methods: frozenset[str] | None = None
     python_allowed_modules: frozenset[str] | None = None
+    # REC-08: raw [read] key view — None means key was ABSENT (allow-any identity).
+    local_allowed_roots: frozenset[str] | None = None
+    ssh_allowed_roots: frozenset[str] | None = None
 
 
 def _coerce_str_set(value: object, key: str) -> frozenset[str]:
@@ -216,6 +238,9 @@ def parse_layer(path: Path) -> RawLayer:
     py_table = data.get("python", {})
     if not isinstance(py_table, dict):
         raise TypeError("[python] must be a table")
+    read_table = data.get("read", {})
+    if not isinstance(read_table, dict):
+        raise TypeError("[read] must be a table")
 
     protected = (
         _coerce_str_set(git_table["protected_branches"], "protected_branches")
@@ -252,6 +277,18 @@ def parse_layer(path: Path) -> RawLayer:
         if "allowed_modules" in py_table
         else None
     )
+    # REC-08: [read] table — key-presence check (same as py_table above).
+    # Absent key -> None (allow-any floor, D-02/D-03). Present key -> frozenset.
+    local_roots = (
+        _coerce_str_set(read_table["local_allowed_roots"], "[read] local_allowed_roots")
+        if "local_allowed_roots" in read_table
+        else None
+    )
+    ssh_roots = (
+        _coerce_str_set(read_table["ssh_allowed_roots"], "[read] ssh_allowed_roots")
+        if "ssh_allowed_roots" in read_table
+        else None
+    )
     return RawLayer(
         protected_branches=protected,
         gated_subcommands=gated,
@@ -260,6 +297,8 @@ def parse_layer(path: Path) -> RawLayer:
         log_enabled=log_enabled,
         python_allowed_methods=py_methods,
         python_allowed_modules=py_modules,
+        local_allowed_roots=local_roots,
+        ssh_allowed_roots=ssh_roots,
     )
 
 
@@ -342,6 +381,27 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
     log_enabled = (
         project.log_enabled if project.log_enabled is not None else base.log_enabled
     )
+
+    # REC-08 / D-01: [read] roots are the SECOND project-widenable allow-affecting
+    # key (after PY-04). Project WIDENS by union (reads are not mutations, D-01).
+    # None-aware union (A1 / RESEARCH Pitfall 1):
+    #   None | X  = None   (allow-any absorbs — a None base already permits
+    #                        everything; unioning in roots would RESTRICT it, which
+    #                        contradicts D-01 "project may only WIDEN")
+    #   set  | set = base∪project  (genuine WIDEN)
+    #   set  | None = base  (additive-identity: absent project key, no change)
+    # Do NOT blindly copy the python `base | project` line — it raises TypeError
+    # when base is None.
+    def _read_root_union(
+        b: frozenset[str] | None,
+        p: frozenset[str] | None,
+    ) -> frozenset[str] | None:
+        if b is None:
+            return None  # allow-any absorbs: stays allow-any
+        if p is None:
+            return b  # absent project key = additive identity
+        return b | p  # both are sets: genuine widen
+
     return ResolvedConfig(
         protected_branches=base.protected_branches | project_protected,
         # gated_subcommands: base ONLY — the untrusted project must NOT contribute
@@ -358,6 +418,13 @@ def merge(base: ResolvedConfig, project: RawLayer) -> ResolvedConfig:
         # the FIRST project-widenable allow-affecting key and an accepted RCE risk.
         python_allowed_methods=base.python_allowed_methods | project_py_methods,
         python_allowed_modules=base.python_allowed_modules | project_py_modules,
+        # REC-08 D-01: None-aware union (A1) — see helper above.
+        local_allowed_roots=_read_root_union(
+            base.local_allowed_roots, project.local_allowed_roots
+        ),
+        ssh_allowed_roots=_read_root_union(
+            base.ssh_allowed_roots, project.ssh_allowed_roots
+        ),
     )
 
 
@@ -404,6 +471,19 @@ def load_layer(path: Path) -> ResolvedConfig:
             raw.python_allowed_modules
             if raw.python_allowed_modules is not None
             else _BUILTIN_PY_MODULES
+        ),
+        # REC-08 D-02/D-03: absent [read] key -> None (allow-any floor).
+        # An explicit [] is honored as frozenset() (a SET list that restricts to
+        # zero allowed roots). The floor constant is None, NOT a populated frozenset.
+        local_allowed_roots=(
+            raw.local_allowed_roots
+            if raw.local_allowed_roots is not None
+            else _BUILTIN_READ_LOCAL_ROOTS
+        ),
+        ssh_allowed_roots=(
+            raw.ssh_allowed_roots
+            if raw.ssh_allowed_roots is not None
+            else _BUILTIN_READ_SSH_ROOTS
         ),
     )
 

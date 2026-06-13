@@ -602,7 +602,7 @@ def test_python_floor_parity_no_drift() -> None:
 
 
 def test_read_root_load_layer_no_read_table_is_none(tmp_path: Path) -> None:
-    """REC-08 D-02/D-03: absent [read] table -> local/ssh roots are None (allow-any floor)."""
+    """REC-08 D-02/D-03: absent [read] table -> local/ssh roots are None (allow-any)."""
     path = _write(tmp_path, '[git]\nprotected_branches = ["main"]\n')
     cfg = load_layer(path)
     assert cfg.local_allowed_roots is None
