@@ -572,7 +572,7 @@ def test_git_registered_after_reader(ctx: Context) -> None:
     git segment resolves via the git guard (git is wired in). CORE-04 ordering
     invariant — one list edit, no engine change.
     """
-    assert len(REGISTRY) == 9
+    assert len(REGISTRY) == 11
     # Reader is reachable through the registry (the common read path, first).
     reader_verdict = fold(["cat foo.txt"], ctx)
     assert reader_verdict is not None and reader_verdict.tag == "reader"

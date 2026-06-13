@@ -102,5 +102,5 @@ def test_registry_entries_are_callable_guards() -> None:
     (``recognize_git in REGISTRY``) no longer holds — order/behavior is what the
     engine depends on.
     """
-    assert len(REGISTRY) == 9
+    assert len(REGISTRY) == 11
     assert all(callable(entry) for entry in REGISTRY)

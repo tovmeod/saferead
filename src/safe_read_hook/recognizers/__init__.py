@@ -26,11 +26,13 @@ from .adb import recognize_adb
 from .find import recognize_find
 from .git import recognize_git
 from .gradle import recognize_gradle
+from .journalctl import recognize_journalctl
 from .psql import recognize_psql
 from .pytest_runner import recognize_pytest
 from .python import recognize_python
 from .reader import recognize_reader
 from .sed import recognize_sed
+from .ssh import recognize_ssh
 
 #: The uniform recognizer contract (D-01).
 Recognizer = Callable[[str, Context], "Verdict | None"]
@@ -55,11 +57,12 @@ def _guarded(tag: str, fn: Recognizer) -> Recognizer:
 
 
 #: Ordered registry; order is significant (D-02). Reader stays FIRST (the common
-#: read path); the git, find, sed, adb, pytest, and gradle recognizers follow
-#: (CORE-04 — one list edit per new recognizer, no engine change). Order among
-#: the latter is immaterial: they claim disjoint leading commands (``git`` /
-#: ``find`` / ``sed`` / ``adb`` / a ``pytest`` launcher shape / a ``gradle``
-#: launcher shape).
+#: read path); the git, find, sed, adb, pytest, gradle, psql, python,
+#: journalctl, and ssh recognizers follow (CORE-04 — one list edit per new
+#: recognizer, no engine change). Order among the latter is immaterial: they
+#: claim disjoint leading commands (``git`` / ``find`` / ``sed`` / ``adb`` /
+#: a ``pytest`` launcher shape / a ``gradle`` launcher shape / ``psql`` /
+#: ``python`` / ``journalctl`` / ``ssh``).
 #:
 #: Each entry is a tag-labeled guard (:func:`_guarded`) so a globally/project
 #: disabled tag abstains its recognizer (D-06). The tag string MUST match the
@@ -75,4 +78,6 @@ REGISTRY: list[Recognizer] = [
     _guarded("gradle", recognize_gradle),
     _guarded("psql", recognize_psql),
     _guarded("python", recognize_python),
+    _guarded("journalctl", recognize_journalctl),
+    _guarded("ssh", recognize_ssh),
 ]
