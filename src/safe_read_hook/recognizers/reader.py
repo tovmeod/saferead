@@ -37,12 +37,14 @@ NOT a general python command.
 
 from __future__ import annotations
 
+import os.path
 import re
 
 from ..analyzers import ANALYZERS
 from ..context import Context
 from ..tokenizer import tokenize
 from ..verdict import Verdict
+from ._pathscope import resolve_lexical, under_any_root
 from ._quoting import strip_one_quote_layer
 from .redirects import redirect_tail_is_safe
 
@@ -342,7 +344,7 @@ def _flag_is_read_only(cmd: str, tok: str) -> bool:
     return False
 
 
-def _tail_is_safe(cmd: str, arg_tokens: list[str]) -> bool:
+def _tail_is_safe(cmd: str, arg_tokens: list[str], ctx: Context) -> bool:
     """True iff every trailing token is a safe arg, flag, or safe redirect.
 
     The redirect decision is delegated WHOLLY to the shared
@@ -364,6 +366,13 @@ def _tail_is_safe(cmd: str, arg_tokens: list[str]) -> bool:
     un-flagged positional write LV-1/LV-2. Scoped to those commands only —
     inputs-only multi-operand reads stay allow.
 
+    REC-08 read-root gate (D-05/D-06): for genuine path operands (NOT
+    echo/printf string operands, NOT grep's first bare operand which is the
+    PATTERN), gate via ``_pathscope``. A no-path read (stdin/cwd) is
+    UNAFFECTED (D-06). SC#3 ssh-relative guard: when ``ctx.read_scope=="ssh"``
+    and the operand is relative, abstain before resolving (remote login dir
+    unknowable; resolving against local cwd would be wrong).
+
     Over-abstains only on a *quoted* ``">"``/``"&"`` argument or an unlisted
     flag — a safe coverage loss (prompt the command), never a false-allow.
     """
@@ -371,8 +380,25 @@ def _tail_is_safe(cmd: str, arg_tokens: list[str]) -> bool:
     # unsafe redirect/control token before the flag + operand classification.
     if not redirect_tail_is_safe(arg_tokens):
         return False
+
+    # REC-08: select the correct root list based on read_scope (D-02/D-03).
+    roots = (
+        ctx.config.ssh_allowed_roots
+        if ctx.read_scope == "ssh"
+        else ctx.config.local_allowed_roots
+    )
+
+    # echo/printf operands are STRINGS, not path operands — never gate (D-06).
+    gate_paths = cmd not in _CMD_ECHO
+
     operand_count = 0
     fence_operands = cmd in _OUTPUT_OPERAND_CMDS
+
+    # grep/egrep/fgrep/rg: the FIRST bare operand is the PATTERN, not a path
+    # (D-05). Track whether we have seen the pattern yet.
+    is_grep_like = cmd in ("grep", "egrep", "fgrep", "rg")
+    grep_pattern_consumed = False
+
     for tok in arg_tokens:
         # Redirect / control tokens were already cleared by the helper above;
         # skip them so the W3 operand count is unchanged from today.
@@ -388,6 +414,25 @@ def _tail_is_safe(cmd: str, arg_tokens: list[str]) -> bool:
             operand_count += 1
             if operand_count >= 2:
                 return False
+
+        # REC-08 path-gate (D-05/D-06).
+        if gate_paths:
+            # ``-`` is stdin, not a file path — skip gating.
+            if tok == "-":
+                continue
+            # grep-family: skip the FIRST bare operand (the PATTERN, not a path).
+            if is_grep_like:
+                if not grep_pattern_consumed:
+                    grep_pattern_consumed = True
+                    continue  # this tok is the PATTERN — not gated
+            # SC#3: ssh-relative guard — abstain BEFORE resolving (remote
+            # login dir is unknowable; do NOT join against local cwd).
+            if ctx.read_scope == "ssh" and not os.path.isabs(tok):
+                return False
+            resolved = resolve_lexical(tok, ctx.cwd)
+            if resolved is None or not under_any_root(resolved, roots):
+                return False
+
     return True
 
 
@@ -424,7 +469,7 @@ def recognize_reader(segment: str, ctx: Context) -> Verdict | None:
     if cmd not in _READ_ONLY_CMDS:
         return None
 
-    if not _tail_is_safe(cmd, args):
+    if not _tail_is_safe(cmd, args, ctx):
         return None
 
     return Verdict("allow", "read-only command", "reader")

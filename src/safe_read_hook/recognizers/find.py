@@ -30,9 +30,12 @@ a non-safe redirect target abstains.
 
 from __future__ import annotations
 
+import os.path
+
 from ..context import Context
 from ..tokenizer import tokenize
 from ..verdict import Verdict
+from ._pathscope import resolve_lexical, under_any_root
 from .redirects import redirect_tail_is_safe
 
 #: Read-only flag predicates / stdout actions that take NO value. The stdout
@@ -161,8 +164,21 @@ def recognize_find(segment: str, ctx: Context) -> Verdict | None:
     if not redirect_tail_is_safe(args):
         return None
 
+    # REC-08: select the correct root list based on read_scope (D-02/D-03).
+    roots = (
+        ctx.config.ssh_allowed_roots
+        if ctx.read_scope == "ssh"
+        else ctx.config.local_allowed_roots
+    )
+
     i = 0
     n = len(args)
+    # Track whether we have encountered any predicate / grouping token. Bare
+    # tokens BEFORE the first predicate are starting paths (REC-08 gated);
+    # value-predicate argument tokens are consumed by i += 2 and never reach
+    # the bare-operand branch below, so the gate is applied only to genuine
+    # starting path tokens.
+    seen_predicate = False
     while i < n:
         tok = args[i]
 
@@ -172,21 +188,35 @@ def recognize_find(segment: str, ctx: Context) -> Verdict | None:
         if tok in _VALUE_PREDICATES or tok.startswith("-newer"):
             if i + 1 >= n:
                 return None  # malformed: predicate with no value
+            seen_predicate = True
             i += 2
             continue
 
         # A no-value flag predicate / stdout action.
         if tok in _FLAG_PREDICATES:
+            seen_predicate = True
             i += 1
             continue
 
         # A grouping / boolean operator.
         if tok in _GROUPING:
+            seen_predicate = True
             i += 1
             continue
 
         # A bare path operand (does not start with ``-``/``+``, not grouping).
+        # REC-08: gate ONLY starting paths (bare tokens BEFORE the first
+        # predicate). Tokens after a predicate are already consumed by i += 2
+        # (value-predicate values) so they never reach this branch.
         if not tok.startswith(("-", "+")):
+            if not seen_predicate:
+                # This is a starting path — gate it via _pathscope (D-05).
+                # SC#3: ssh-relative guard — abstain BEFORE resolving.
+                if ctx.read_scope == "ssh" and not os.path.isabs(tok):
+                    return None
+                resolved = resolve_lexical(tok, ctx.cwd)
+                if resolved is None or not under_any_root(resolved, roots):
+                    return None
             i += 1
             continue
 

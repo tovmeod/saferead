@@ -199,7 +199,7 @@ def test_find_root_operand_predicate_value_not_gated() -> None:
 # --- root: relative starting path with cwd=None -> abstain (unresolvable) ---
 
 
-def test_find_root_abstain_relative_cwd_none() -> None:
+def test_find_root_abstain_unresolved_relative_cwd_none() -> None:
     """find . with cwd=None and set root -> abstain (relative path unresolvable)."""
     ctx = Context(
         cwd=None,

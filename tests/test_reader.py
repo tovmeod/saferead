@@ -381,7 +381,7 @@ def test_reader_root_abstain_dotdot_escape() -> None:
 # --- root: relative path with cwd=None -> abstain (unresolvable, D-04) ---
 
 
-def test_reader_root_abstain_relative_cwd_none() -> None:
+def test_reader_root_abstain_unresolved_relative_cwd_none() -> None:
     """cat rel/file with cwd=None -> abstain: can't prove the path is in root."""
     ctx = Context(
         cwd=None,
