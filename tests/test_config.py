@@ -579,3 +579,122 @@ def test_python_floor_parity_no_drift() -> None:
 
     assert _BUILTIN_PY_METHODS == _FLOOR_METHODS
     assert _BUILTIN_PY_MODULES == _FLOOR_MODULES
+
+
+# --- REC-08 / D-01/D-02/D-03: [read] local_allowed_roots + ssh_allowed_roots ----
+#
+# REC-08 adds two new [read] keys that share the SAME absent-vs-present machinery
+# as [python], BUT with POLARITY INVERSION on the floor: the built-in floor is
+# None (allow-any, D-02 / D-03), NOT a populated frozenset like [python]. This
+# means:
+#   - load_layer on a config with NO [read] table -> both fields are None (allow-any)
+#   - load_layer on a config with [read] local_allowed_roots = [] -> frozenset()
+#     (explicit empty honored, NOT None — D-02 "a SET list restricts")
+#   - parse_layer: present key -> frozenset; absent key -> None
+#
+# merge (D-01): project WIDENS by union (reads are not mutations). BUT the
+# None-absorbing rule (A1, RESEARCH Pitfall 1):
+#   - base=None (allow-any), project=set -> None  (union of any+set is still any)
+#   - base=set,  project=set             -> base|project  (WIDEN by union)
+#   - base=set,  project=None (absent)   -> base  (additive identity, no change)
+#
+# Test-name contract: substrings read_root / widen in test names so -k selects them.
+
+
+def test_read_root_load_layer_no_read_table_is_none(tmp_path: Path) -> None:
+    """REC-08 D-02/D-03: absent [read] table -> local/ssh roots are None (allow-any floor)."""
+    path = _write(tmp_path, '[git]\nprotected_branches = ["main"]\n')
+    cfg = load_layer(path)
+    assert cfg.local_allowed_roots is None
+    assert cfg.ssh_allowed_roots is None
+
+
+def test_read_root_load_layer_present_local_roots(tmp_path: Path) -> None:
+    """REC-08: present [read] local_allowed_roots parsed into frozenset."""
+    path = _write(tmp_path, '[read]\nlocal_allowed_roots = ["/a", "/b"]\n')
+    cfg = load_layer(path)
+    assert cfg.local_allowed_roots == frozenset({"/a", "/b"})
+    assert cfg.ssh_allowed_roots is None  # absent key = None (allow-any)
+
+
+def test_read_root_load_layer_present_ssh_roots(tmp_path: Path) -> None:
+    """REC-08: present [read] ssh_allowed_roots parsed into frozenset."""
+    path = _write(tmp_path, '[read]\nssh_allowed_roots = ["/remote/share"]\n')
+    cfg = load_layer(path)
+    assert cfg.ssh_allowed_roots == frozenset({"/remote/share"})
+    assert cfg.local_allowed_roots is None
+
+
+def test_read_root_load_layer_explicit_empty_list_is_frozenset_not_none(
+    tmp_path: Path,
+) -> None:
+    """REC-08 D-02: explicit [] is frozenset() (restricts all), NOT None (allow-any)."""
+    path = _write(tmp_path, "[read]\nlocal_allowed_roots = []\n")
+    cfg = load_layer(path)
+    assert cfg.local_allowed_roots == frozenset()
+    assert cfg.local_allowed_roots is not None
+
+
+def test_read_root_floor_on_builtin_config_is_none() -> None:
+    """REC-08 D-02/D-03: builtin_config() floor for both read-root keys is None."""
+    cfg = builtin_config()
+    assert cfg.local_allowed_roots is None
+    assert cfg.ssh_allowed_roots is None
+
+
+def test_read_root_widen_base_set_union_project_set(tmp_path: Path) -> None:
+    """REC-08 D-01: base set | project set -> union (WIDEN; reads are not mutations)."""
+    from safe_read_hook.config import ResolvedConfig
+
+    base = ResolvedConfig(
+        protected_branches=frozenset({"main"}),
+        gated_subcommands=frozenset({"add", "commit", "stash"}),
+        disabled_recognizers=frozenset(),
+        local_allowed_roots=frozenset({"/b"}),
+    )
+    project_path = _write(tmp_path, '[read]\nlocal_allowed_roots = ["/p"]\n')
+    result = merge(base, parse_layer(project_path))
+    assert result.local_allowed_roots == frozenset({"/b", "/p"})
+
+
+def test_read_root_widen_none_base_project_set_stays_none(tmp_path: Path) -> None:
+    """REC-08 A1 (None-absorbing): base=None + project={"/p"} -> None.
+
+    A None base (allow-any) cannot be 'widened' by adding roots — allow-any is
+    already the maximum allowed surface. Adding roots would actually RESTRICT it,
+    which contradicts D-01 (project may only WIDEN). So None absorbs (A1).
+    """
+    base = builtin_config()  # local_allowed_roots=None (allow-any)
+    project_path = _write(tmp_path, '[read]\nlocal_allowed_roots = ["/p"]\n')
+    result = merge(base, parse_layer(project_path))
+    assert result.local_allowed_roots is None  # None absorbs: stays allow-any
+
+
+def test_read_root_widen_base_set_project_absent_stays_base(tmp_path: Path) -> None:
+    """REC-08 D-07: base=set, project absent -> base (additive identity)."""
+    from safe_read_hook.config import ResolvedConfig
+
+    base = ResolvedConfig(
+        protected_branches=frozenset({"main"}),
+        gated_subcommands=frozenset({"add", "commit", "stash"}),
+        disabled_recognizers=frozenset(),
+        local_allowed_roots=frozenset({"/b"}),
+    )
+    project_path = _write(tmp_path, '[git]\nprotected_branches = ["release"]\n')
+    result = merge(base, parse_layer(project_path))
+    assert result.local_allowed_roots == frozenset({"/b"})
+
+
+def test_read_root_parse_layer_non_dict_read_table_raises(tmp_path: Path) -> None:
+    """REC-08: a non-dict [read] value (e.g. a string) raises TypeError."""
+    path = _write(tmp_path, "read = 'not-a-table'\n")
+    with pytest.raises(TypeError):
+        parse_layer(path)
+
+
+def test_read_root_parse_layer_absent_key_is_none(tmp_path: Path) -> None:
+    """REC-08: absent keys in a present [read] table -> None (not frozenset())."""
+    path = _write(tmp_path, "[read]\n")  # table present but both keys absent
+    raw = parse_layer(path)
+    assert raw.local_allowed_roots is None
+    assert raw.ssh_allowed_roots is None
