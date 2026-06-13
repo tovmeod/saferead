@@ -107,10 +107,11 @@ def test_entrypoint_injects_real_branch_resolver(monkeypatch) -> None:
     captured: dict[str, object] = {}
     real_context = module.Context  # capture BEFORE patching (avoid self-recursion)
 
-    def _capture_context(*, cwd, _resolver, config):
+    def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["resolver"] = _resolver
+        captured["staged_resolver"] = _staged_resolver
         # Hand back a REAL Context so the entrypoint's fold() path runs normally.
-        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
 
@@ -123,6 +124,34 @@ def test_entrypoint_injects_real_branch_resolver(monkeypatch) -> None:
     module.main()
 
     assert captured["resolver"] is module._resolve_branch
+
+
+def test_entrypoint_injects_real_staged_resolver(monkeypatch) -> None:
+    """The entrypoint builds Context with ``_staged_resolver=_resolve_staged`` (REC-09).
+
+    Mirrors ``test_entrypoint_injects_real_branch_resolver``: captures the
+    ``_staged_resolver`` kwarg and asserts it IS the real ``_resolve_staged``
+    function. No live subprocess — the resolver identity is checked, never called.
+    """
+    module = _load_entrypoint_module()
+    captured: dict[str, object] = {}
+    real_context = module.Context
+
+    def _capture_context(*, cwd, _resolver, _staged_resolver, config):
+        captured["staged_resolver"] = _staged_resolver
+        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
+
+    monkeypatch.setattr(module, "Context", _capture_context)
+
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+        "cwd": "/x",
+    }
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    module.main()
+
+    assert captured["staged_resolver"] is module._resolve_staged
 
 
 class _StdinStub:
@@ -154,9 +183,9 @@ def test_entrypoint_injects_resolved_global_config(monkeypatch, tmp_path) -> Non
     captured: dict[str, object] = {}
     real_context = module.Context
 
-    def _capture_context(*, cwd, _resolver, config):
+    def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -180,9 +209,9 @@ def test_entrypoint_absent_global_injects_builtin(monkeypatch, tmp_path) -> None
     captured: dict[str, object] = {}
     real_context = module.Context
 
-    def _capture_context(*, cwd, _resolver, config):
+    def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -213,9 +242,9 @@ def test_entrypoint_absent_protected_key_keeps_builtin(monkeypatch, tmp_path) ->
     captured: dict[str, object] = {}
     real_context = module.Context
 
-    def _capture_context(*, cwd, _resolver, config):
+    def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -242,9 +271,9 @@ def test_entrypoint_malformed_global_degrades_to_builtin(monkeypatch, tmp_path) 
     captured: dict[str, object] = {}
     real_context = module.Context
 
-    def _capture_context(*, cwd, _resolver, config):
+    def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -272,9 +301,9 @@ def _capture_config_module(module, monkeypatch, payload_command: str = "git stat
     captured: dict[str, object] = {}
     real_context = module.Context
 
-    def _capture_context(*, cwd, _resolver, config):
+    def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -519,9 +548,9 @@ def test_entrypoint_malformed_global_asks_on_main(monkeypatch, tmp_path) -> None
     captured: dict[str, object] = {}
     real_context = module.Context
 
-    def _capture_context(*, cwd, _resolver, config):
+    def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, config=config)
+        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {

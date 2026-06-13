@@ -136,6 +136,30 @@ def _resolve_branch(cwd: str | None) -> str | None:
         return None
 
 
+def _resolve_staged(cwd: str | None) -> list[str] | None:
+    """Return the list of staged file paths for ``cwd`` (the real REC-09 probe).
+
+    Runs ``git diff --cached --name-only`` as an argv list (``shell=False`` — no
+    shell, no command injection via a crafted cwd; mirrors T-05-06 / T-14-14
+    mitigation from ``_resolve_branch``). Returns a list of non-empty lines from
+    stdout, or ``None`` on any error (not-a-repo / timeout / probe failure),
+    which causes the caller to ASK (D-08 fail-safe). Injected at Context
+    construction so git.py's ``_planning_only`` never shells out directly.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        )
+        return [ln for ln in out.stdout.splitlines() if ln]
+    except Exception:
+        return None  # any error -> caller ASKs (D-08)
+
+
 def main() -> None:
     """Read a PreToolUse payload from stdin and emit a decision envelope, or nothing."""
     try:
@@ -154,6 +178,7 @@ def main() -> None:
         ctx = Context(
             cwd=payload.get("cwd"),
             _resolver=_resolve_branch,
+            _staged_resolver=_resolve_staged,
             config=config,
         )
         result = tokenize(command)
