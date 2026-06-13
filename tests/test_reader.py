@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from safe_read_hook.analyzers import ANALYZERS
+from safe_read_hook.config import ResolvedConfig
 from safe_read_hook.context import Context
 from safe_read_hook.recognizers.reader import recognize_reader
 from safe_read_hook.verdict import Verdict
@@ -305,3 +306,206 @@ def test_reader_multi_input_stays_allow(segment: str, ctx: Context) -> None:
     assert verdict is not None
     assert verdict.decision == "allow"
     assert verdict.tag == "reader"
+
+
+# ---------------------------------------------------------------------------
+# REC-08: read-root gating in reader.py (14-02)
+# Test names contain "root" so -k "root" selects them all.
+# ---------------------------------------------------------------------------
+
+
+def _root_ctx(roots: frozenset[str] | None, cwd: str = "/allowed/sub") -> Context:
+    """Return a Context with local_allowed_roots set for root-gate tests."""
+    return Context(
+        cwd=cwd,
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            local_allowed_roots=roots,
+        ),
+    )
+
+
+# --- root: absolute path under the allowed root -> allow ---
+
+
+def test_reader_root_allow_absolute_under_root() -> None:
+    """cat /allowed/f with local_allowed_roots={'/allowed'} -> allow."""
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_reader("cat /allowed/f", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: absolute path outside any root -> abstain ---
+
+
+def test_reader_root_abstain_absolute_outside_root() -> None:
+    """cat /etc/passwd with root={'/allowed'} -> abstain (path-gate)."""
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
+    assert recognize_reader("cat /etc/passwd", ctx) is None
+
+
+# --- root: unset (None) root list -> allow-any (no regression, D-02) ---
+
+
+def test_reader_root_unset_list_allows_any_path() -> None:
+    """Unset roots (None) -> allow-any: cat /etc/passwd still allows."""
+    ctx = _root_ctx(None, cwd="/work")
+    verdict = recognize_reader("cat /etc/passwd", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: relative path resolved against cwd -> allow when under root ---
+
+
+def test_reader_root_allow_relative_resolves_into_root() -> None:
+    """cat ../f from cwd=/allowed/sub resolves to /allowed/f -> allow under /allowed."""
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/allowed/sub")
+    verdict = recognize_reader("cat ../f", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: escape via ../ resolves OUTSIDE root -> abstain (T-14-05) ---
+
+
+def test_reader_root_abstain_dotdot_escape() -> None:
+    """cat ../../etc/passwd from cwd=/allowed/sub escapes /allowed -> abstain (T-14-05)."""
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/allowed/sub")
+    assert recognize_reader("cat ../../etc/passwd", ctx) is None
+
+
+# --- root: relative path with cwd=None -> abstain (unresolvable, D-04) ---
+
+
+def test_reader_root_abstain_relative_cwd_none() -> None:
+    """cat rel/file with cwd=None -> abstain: can't prove the path is in root."""
+    ctx = Context(
+        cwd=None,
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            local_allowed_roots=frozenset({"/allowed"}),
+        ),
+    )
+    assert recognize_reader("cat rel/file", ctx) is None
+
+
+# --- root: operand identification — grep PATTERN not gated (D-05/D-06) ---
+
+
+def test_reader_root_operand_grep_pattern_not_gated() -> None:
+    """grep PATTERN /allowed/f with root={'/allowed'}: PATTERN not gated, file gated.
+
+    D-05/D-06: the FIRST bare operand to grep is the PATTERN, not a path.
+    Only the FILE operands are gated. A file under root -> allow.
+    """
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_reader("grep /etc/passwd /allowed/f", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+def test_reader_root_operand_grep_file_outside_root_abstains() -> None:
+    """grep PATTERN /outside/f with root={'/allowed'}: file outside root -> abstain."""
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
+    assert recognize_reader("grep needle /outside/f", ctx) is None
+
+
+def test_reader_root_operand_grep_no_file_unaffected() -> None:
+    """grep PATTERN (no file, reads stdin) with set root -> allow (D-06).
+
+    A read with no path operand is UNAFFECTED by read-roots.
+    """
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
+    # grep with no file operand reads from stdin — no path to gate
+    verdict = recognize_reader("grep needle", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: operand identification — echo/printf strings NOT gated (D-06) ---
+
+
+def test_reader_root_operand_echo_string_not_gated() -> None:
+    """echo /etc/passwd with a set root -> allow (operand is a string, not a path, D-06)."""
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_reader("echo /etc/passwd", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+def test_reader_root_operand_printf_string_not_gated() -> None:
+    """printf '%s' /etc/passwd with a set root -> allow (operands are strings, D-06)."""
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_reader("printf '%s' /etc/passwd", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: no path operand (stdin, cat from stdin) -> allow (D-06) ---
+
+
+def test_reader_root_no_path_operand_cat_stdin_allow() -> None:
+    """cat (no operand, reads stdin) with set roots -> allow (D-06 no-path unaffected)."""
+    ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_reader("cat", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: ssh scope — relative path abstains pre-resolution (SC#3 guard) ---
+
+
+def test_reader_root_scope_ssh_relative_abstains() -> None:
+    """With read_scope='ssh', a RELATIVE operand abstains before resolution (SC#3).
+
+    Remote login dir is unknowable; resolving against local cwd would be wrong.
+    """
+    ctx = Context(
+        cwd="/allowed",
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            ssh_allowed_roots=frozenset({"/allowed"}),
+        ),
+        read_scope="ssh",
+    )
+    assert recognize_reader("cat rel/file", ctx) is None
+
+
+def test_reader_root_scope_ssh_absolute_under_root_allows() -> None:
+    """With read_scope='ssh', an absolute path under ssh_allowed_roots -> allow."""
+    ctx = Context(
+        cwd="/work",
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            ssh_allowed_roots=frozenset({"/allowed"}),
+        ),
+        read_scope="ssh",
+    )
+    verdict = recognize_reader("cat /allowed/f", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+def test_reader_root_scope_ssh_absolute_outside_root_abstains() -> None:
+    """With read_scope='ssh', an absolute path outside ssh_allowed_roots -> abstain."""
+    ctx = Context(
+        cwd="/work",
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            ssh_allowed_roots=frozenset({"/allowed"}),
+        ),
+        read_scope="ssh",
+    )
+    assert recognize_reader("cat /etc/passwd", ctx) is None

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import pytest
 
+from safe_read_hook.config import ResolvedConfig
 from safe_read_hook.context import Context
 from safe_read_hook.engine import fold
 from safe_read_hook.recognizers.find import recognize_find
@@ -108,3 +109,140 @@ def test_find_allow_through_fold_readonly(ctx: Context) -> None:
 
 def test_find_mutating_through_fold_abstain(ctx: Context) -> None:
     assert fold(["find . -delete"], ctx) is None
+
+
+# ---------------------------------------------------------------------------
+# REC-08: read-root gating in find.py (14-02)
+# Test names contain "root" so -k "root" selects them all.
+# ---------------------------------------------------------------------------
+
+
+def _find_root_ctx(roots: frozenset[str] | None, cwd: str = "/work") -> Context:
+    """Return a Context with local_allowed_roots set for root-gate tests."""
+    return Context(
+        cwd=cwd,
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            local_allowed_roots=roots,
+        ),
+    )
+
+
+# --- root: starting path under allowed root -> allow ---
+
+
+def test_find_root_allow_absolute_starting_path_under_root() -> None:
+    """find /allowed -name x with root={'/allowed'} -> allow."""
+    ctx = _find_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_find("find /allowed -name x", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: starting path outside any root -> abstain ---
+
+
+def test_find_root_abstain_absolute_starting_path_outside_root() -> None:
+    """find /etc -name x with root={'/allowed'} -> abstain."""
+    ctx = _find_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    assert recognize_find("find /etc -name x", ctx) is None
+
+
+# --- root: unset (None) root list -> allow-any (no regression, D-02) ---
+
+
+def test_find_root_unset_list_allows_any_path() -> None:
+    """Unset roots (None) -> allow-any: find /etc -name x still allows."""
+    ctx = _find_root_ctx(None, cwd="/work")
+    verdict = recognize_find("find /etc -name x", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: relative starting path resolved against cwd -> allow under root ---
+
+
+def test_find_root_allow_relative_starting_path_under_root() -> None:
+    """find . -name x from cwd=/allowed resolves to /allowed -> allow under /allowed."""
+    ctx = _find_root_ctx(frozenset({"/allowed"}), cwd="/allowed")
+    verdict = recognize_find("find . -name x", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: relative starting path resolves OUTSIDE root -> abstain ---
+
+
+def test_find_root_abstain_relative_starting_path_outside_root() -> None:
+    """find . -name x from cwd=/outside (not under /allowed) -> abstain."""
+    ctx = _find_root_ctx(frozenset({"/allowed"}), cwd="/outside")
+    assert recognize_find("find . -name x", ctx) is None
+
+
+# --- root: operand identification — -name VALUE not gated (D-05) ---
+
+
+def test_find_root_operand_predicate_value_not_gated() -> None:
+    """find /allowed -name /etc/passwd: -name's value is NOT gated as a path (D-05).
+
+    The value '/etc/passwd' is a -name pattern, not a starting path.
+    Only the starting path '/allowed' is gated; it is under root -> allow.
+    """
+    ctx = _find_root_ctx(frozenset({"/allowed"}), cwd="/work")
+    verdict = recognize_find("find /allowed -name /etc/passwd", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
+
+
+# --- root: relative starting path with cwd=None -> abstain (unresolvable) ---
+
+
+def test_find_root_abstain_relative_cwd_none() -> None:
+    """find . with cwd=None and set root -> abstain (relative path unresolvable)."""
+    ctx = Context(
+        cwd=None,
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            local_allowed_roots=frozenset({"/allowed"}),
+        ),
+    )
+    assert recognize_find("find . -name x", ctx) is None
+
+
+# --- root: ssh scope — relative starting path abstains pre-resolution (SC#3) ---
+
+
+def test_find_root_scope_ssh_relative_starting_path_abstains() -> None:
+    """With read_scope='ssh', a RELATIVE starting path abstains before resolution (SC#3)."""
+    ctx = Context(
+        cwd="/allowed",
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            ssh_allowed_roots=frozenset({"/allowed"}),
+        ),
+        read_scope="ssh",
+    )
+    assert recognize_find("find . -name x", ctx) is None
+
+
+def test_find_root_scope_ssh_absolute_under_root_allows() -> None:
+    """With read_scope='ssh', an absolute starting path under ssh_allowed_roots -> allow."""
+    ctx = Context(
+        cwd="/work",
+        config=ResolvedConfig(
+            protected_branches=frozenset({"master", "main"}),
+            gated_subcommands=frozenset({"add", "commit", "stash"}),
+            disabled_recognizers=frozenset(),
+            ssh_allowed_roots=frozenset({"/allowed"}),
+        ),
+        read_scope="ssh",
+    )
+    verdict = recognize_find("find /allowed -name x", ctx)
+    assert verdict is not None
+    assert verdict.decision == "allow"
