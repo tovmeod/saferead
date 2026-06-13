@@ -190,15 +190,21 @@ def recognize_git(segment: str, ctx: Context) -> Verdict | None:
             # visible. Diverges from the seed's abstain.
             return Verdict("ask", "unresolved branch — approve manually", "git")
         if branch in ctx.config.protected_branches:
-            if sub in ("add", "commit") and _planning_only(sub, args, effective_cwd, ctx):
-                return Verdict("allow", ".planning/ doc commit on protected branch", "git")
+            if sub in ("add", "commit") and _planning_only(
+                sub, args, effective_cwd, ctx
+            ):
+                return Verdict(
+                    "allow", ".planning/ doc commit on protected branch", "git"
+                )
             return Verdict("ask", f"protected branch '{branch}'", "git")
         return Verdict("allow", f"gated git op on '{branch}'", "git")
 
     return None
 
 
-def _planning_only(sub: str, args: list[str], effective_cwd: str | None, ctx: Context) -> bool:
+def _planning_only(
+    sub: str, args: list[str], effective_cwd: str | None, ctx: Context
+) -> bool:
     """Return True iff the add/commit touches ONLY the hardcoded ``.planning/`` tree.
 
     Prove-or-ASK (D-08): explicit pathspecs are lexically checked; a bare
@@ -234,7 +240,7 @@ def _planning_only(sub: str, args: list[str], effective_cwd: str | None, ctx: Co
         planning_root = None
 
     def _under_planning(resolved: str | None) -> bool:
-        """True iff resolved is equal to or a child of planning_root (component-boundary safe)."""
+        """True iff resolved equals or is a child of planning_root (boundary-safe)."""
         if resolved is None or planning_root is None:
             return False
         nr = planning_root  # already normpath'd above
@@ -269,9 +275,22 @@ def _planning_only(sub: str, args: list[str], effective_cwd: str | None, ctx: Co
     # must be skipped (T-14-15: 'msg' in 'git commit -m msg' is not a path).
     # Value-bearing flags whose NEXT token is the flag value (not a pathspec).
     # T-14-15: 'msg' in 'git commit -m msg' must not be treated as a pathspec.
-    _VALUE_FLAGS = frozenset({"-m", "-F", "--author", "--message", "--file", "--cleanup",
-                               "-C", "--reuse-message", "-c", "--reedit-message",
-                               "-e", "--edit"})
+    _VALUE_FLAGS = frozenset(
+        {
+            "-m",
+            "-F",
+            "--author",
+            "--message",
+            "--file",
+            "--cleanup",
+            "-C",
+            "--reuse-message",
+            "-c",
+            "--reedit-message",
+            "-e",
+            "--edit",
+        }
+    )
 
     positionals: list[str] = []
     has_separator = False
@@ -281,7 +300,7 @@ def _planning_only(sub: str, args: list[str], effective_cwd: str | None, ctx: Co
         tok = args[i]
         if tok == "--":
             has_separator = True
-            post_sep_tokens = args[i + 1:]
+            post_sep_tokens = args[i + 1 :]
             break
         if tok in _VALUE_FLAGS:
             i += 2  # skip flag and its value
@@ -300,15 +319,19 @@ def _planning_only(sub: str, args: list[str], effective_cwd: str | None, ctx: Co
         all_specs = positionals + post_sep_tokens
         if not all_specs:
             # '--' with nothing after and no positionals before: treat as bare commit.
-            # Fall through to the probe path (has_separator=True but no specs collected).
+            # Fall through to the probe path (has_separator=True, no specs collected).
             pass
         else:
-            return all(_under_planning(resolve_lexical(p, effective_cwd)) for p in all_specs)
+            return all(
+                _under_planning(resolve_lexical(p, effective_cwd)) for p in all_specs
+            )
 
     if positionals:
         # Positional pathspecs present (before '--', or no '--'): prove from them.
         # Do NOT consult the probe (B1/B2).
-        return all(_under_planning(resolve_lexical(p, effective_cwd)) for p in positionals)
+        return all(
+            _under_planning(resolve_lexical(p, effective_cwd)) for p in positionals
+        )
 
     # Genuinely bare commit: zero positionals AND (no '--' OR '--' with no tokens).
     # Consult the staged-set probe. (B2: this branch is only reached when zero

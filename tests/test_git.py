@@ -605,7 +605,7 @@ def _make_planning_ctx(
     staged: list[str] | None = None,
     staged_spy: list[str | None] | None = None,
 ) -> Context:
-    """Build a Context with fake branch resolver + staged resolver for planning tests."""
+    """Context with fake branch + staged resolvers for planning tests."""
     _staged_calls: list[str | None] = staged_spy if staged_spy is not None else []
 
     def _fake_staged(cwd: str | None) -> list[str] | None:
@@ -766,7 +766,9 @@ def test_git_planning_gated_bare_commit_all_planning_allow() -> None:
     A genuinely-bare commit (no positionals, no --) consults _staged_resolver;
     every returned path under .planning/ -> ALLOW. Named with 'planning' + 'gated'.
     """
-    ctx = _make_planning_ctx(branch="main", staged=[".planning/STATE.md", ".planning/ROADMAP.md"])
+    ctx = _make_planning_ctx(
+        branch="main", staged=[".planning/STATE.md", ".planning/ROADMAP.md"]
+    )
     verdict = recognize_git("git commit -m 'docs'", ctx)
     assert verdict is not None
     assert verdict.decision == "allow"
@@ -852,8 +854,11 @@ def test_git_planning_gated_probe_not_called_when_positional_present() -> None:
     Tests both post-'--' positional and bare positional. The spy raises on call
     to make the B2 violation loud. Named with 'planning' + 'gated'.
     """
+
     def _spy_staged(_cwd: str | None) -> list[str] | None:
-        raise AssertionError("_staged_resolver called with a positional pathspec present (B2 violation)")
+        raise AssertionError(
+            "_staged_resolver called with a positional pathspec present (B2 violation)"
+        )
 
     # post-'--' positional -> proven from pathspec, probe must not fire
     ctx_sep = Context(

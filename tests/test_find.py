@@ -217,7 +217,7 @@ def test_find_root_abstain_unresolved_relative_cwd_none() -> None:
 
 
 def test_find_root_scope_ssh_relative_starting_path_abstains() -> None:
-    """With read_scope='ssh', a RELATIVE starting path abstains before resolution (SC#3)."""
+    """read_scope='ssh': a RELATIVE starting path abstains before resolution (SC#3)."""
     ctx = Context(
         cwd="/allowed",
         config=ResolvedConfig(
@@ -232,7 +232,7 @@ def test_find_root_scope_ssh_relative_starting_path_abstains() -> None:
 
 
 def test_find_root_scope_ssh_absolute_under_root_allows() -> None:
-    """With read_scope='ssh', an absolute starting path under ssh_allowed_roots -> allow."""
+    """read_scope='ssh': an absolute starting path under ssh_allowed_roots -> allow."""
     ctx = Context(
         cwd="/work",
         config=ResolvedConfig(

@@ -111,7 +111,12 @@ def test_entrypoint_injects_real_branch_resolver(monkeypatch) -> None:
         captured["resolver"] = _resolver
         captured["staged_resolver"] = _staged_resolver
         # Hand back a REAL Context so the entrypoint's fold() path runs normally.
-        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
+        return real_context(
+            cwd=cwd,
+            _resolver=_resolver,
+            _staged_resolver=_staged_resolver,
+            config=config,
+        )
 
     monkeypatch.setattr(module, "Context", _capture_context)
 
@@ -139,7 +144,12 @@ def test_entrypoint_injects_real_staged_resolver(monkeypatch) -> None:
 
     def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["staged_resolver"] = _staged_resolver
-        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
+        return real_context(
+            cwd=cwd,
+            _resolver=_resolver,
+            _staged_resolver=_staged_resolver,
+            config=config,
+        )
 
     monkeypatch.setattr(module, "Context", _capture_context)
 
@@ -185,7 +195,12 @@ def test_entrypoint_injects_resolved_global_config(monkeypatch, tmp_path) -> Non
 
     def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
+        return real_context(
+            cwd=cwd,
+            _resolver=_resolver,
+            _staged_resolver=_staged_resolver,
+            config=config,
+        )
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -211,7 +226,12 @@ def test_entrypoint_absent_global_injects_builtin(monkeypatch, tmp_path) -> None
 
     def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
+        return real_context(
+            cwd=cwd,
+            _resolver=_resolver,
+            _staged_resolver=_staged_resolver,
+            config=config,
+        )
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -244,7 +264,12 @@ def test_entrypoint_absent_protected_key_keeps_builtin(monkeypatch, tmp_path) ->
 
     def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
+        return real_context(
+            cwd=cwd,
+            _resolver=_resolver,
+            _staged_resolver=_staged_resolver,
+            config=config,
+        )
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -273,7 +298,12 @@ def test_entrypoint_malformed_global_degrades_to_builtin(monkeypatch, tmp_path) 
 
     def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
+        return real_context(
+            cwd=cwd,
+            _resolver=_resolver,
+            _staged_resolver=_staged_resolver,
+            config=config,
+        )
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -303,7 +333,12 @@ def _capture_config_module(module, monkeypatch, payload_command: str = "git stat
 
     def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
+        return real_context(
+            cwd=cwd,
+            _resolver=_resolver,
+            _staged_resolver=_staged_resolver,
+            config=config,
+        )
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -550,7 +585,12 @@ def test_entrypoint_malformed_global_asks_on_main(monkeypatch, tmp_path) -> None
 
     def _capture_context(*, cwd, _resolver, _staged_resolver, config):
         captured["config"] = config
-        return real_context(cwd=cwd, _resolver=_resolver, _staged_resolver=_staged_resolver, config=config)
+        return real_context(
+            cwd=cwd,
+            _resolver=_resolver,
+            _staged_resolver=_staged_resolver,
+            config=config,
+        )
 
     monkeypatch.setattr(module, "Context", _capture_context)
     payload = {
@@ -746,9 +786,7 @@ def test_audit_logging_enabled_false_override_suppresses_line(
 
     # enabled=true at a fresh path: exactly one line lands there.
     audit_on = tmp_path / "on.log"
-    _point_audit(
-        module, monkeypatch, tmp_path, audit_on, body_extra="enabled = true\n"
-    )
+    _point_audit(module, monkeypatch, tmp_path, audit_on, body_extra="enabled = true\n")
     _run_in_process(module, monkeypatch, "cat foo.txt")
     assert audit_on.read_text(encoding="utf-8").splitlines() != []
 

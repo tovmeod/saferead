@@ -22,10 +22,7 @@ under_any_root:
 
 from __future__ import annotations
 
-import pytest
-
 from safe_read_hook.recognizers._pathscope import resolve_lexical, under_any_root
-
 
 # ---------------------------------------------------------------------------
 # resolve_lexical
@@ -79,14 +76,17 @@ def test_under_any_root_none_roots_is_allow_any() -> None:
 
 def test_under_any_root_path_under_root_returns_true() -> None:
     """Resolved path is a child of a root entry -> True."""
-    assert under_any_root(
-        "/home/me/.planning/x", frozenset({"/home/me/.planning"})
-    ) is True
+    assert (
+        under_any_root("/home/me/.planning/x", frozenset({"/home/me/.planning"}))
+        is True
+    )
 
 
 def test_under_any_root_exact_root_match_returns_true() -> None:
     """resolved == root exactly -> True (D-02 exact-equal case)."""
-    assert under_any_root("/home/me/.planning", frozenset({"/home/me/.planning"})) is True
+    assert (
+        under_any_root("/home/me/.planning", frozenset({"/home/me/.planning"})) is True
+    )
 
 
 def test_under_any_root_component_boundary_evil_sibling_false() -> None:
@@ -96,9 +96,10 @@ def test_under_any_root_component_boundary_evil_sibling_false() -> None:
     for '/home/me/.planningEVIL' against root '/home/me/.planning'.
     The guarded form (startswith(root + os.sep)) must return False here.
     """
-    assert under_any_root(
-        "/home/me/.planningEVIL", frozenset({"/home/me/.planning"})
-    ) is False
+    assert (
+        under_any_root("/home/me/.planningEVIL", frozenset({"/home/me/.planning"}))
+        is False
+    )
 
 
 def test_under_any_root_outside_root_returns_false() -> None:
@@ -113,9 +114,12 @@ def test_under_any_root_trailing_slash_root_normalizes_and_matches() -> None:
 
 def test_under_any_root_nested_child_under_root() -> None:
     """Deeply nested child of a root -> True."""
-    assert under_any_root(
-        "/home/me/.planning/phases/14/PLAN.md", frozenset({"/home/me/.planning"})
-    ) is True
+    assert (
+        under_any_root(
+            "/home/me/.planning/phases/14/PLAN.md", frozenset({"/home/me/.planning"})
+        )
+        is True
+    )
 
 
 def test_under_any_root_multiple_roots_one_matches() -> None:

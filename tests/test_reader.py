@@ -113,7 +113,7 @@ def test_reader_cat_is_allow_prover(ctx: Context) -> None:
         "xxd a b",  # xxd in out writes outfile
         # awk: Turing-complete, every invocation abstains (D-01/D-03)
         "awk '{print $1}'",
-        'awk \'BEGIN{print > "/etc/x"}\'',
+        "awk 'BEGIN{print > \"/etc/x\"}'",
         # tee writes files — unclaimed -> abstain (D-09)
         "tee f",
         "tee out.txt",
@@ -265,7 +265,7 @@ def test_reader_abstains_on_awk(ctx: Context) -> None:
     not-allow.
     """
     assert recognize_reader("awk '{print $1}'", ctx) is None
-    assert recognize_reader('awk \'BEGIN{print > "/etc/x"}\'', ctx) is None
+    assert recognize_reader("awk 'BEGIN{print > \"/etc/x\"}'", ctx) is None
 
 
 # --- tee: unclaimed -> abstain, asserted via a DIRECT call (D-09) ----------
@@ -373,7 +373,7 @@ def test_reader_root_allow_relative_resolves_into_root() -> None:
 
 
 def test_reader_root_abstain_dotdot_escape() -> None:
-    """cat ../../etc/passwd from cwd=/allowed/sub escapes /allowed -> abstain (T-14-05)."""
+    """cat ../../etc/passwd from /allowed/sub escapes /allowed -> abstain (T-14-05)."""
     ctx = _root_ctx(frozenset({"/allowed"}), cwd="/allowed/sub")
     assert recognize_reader("cat ../../etc/passwd", ctx) is None
 
@@ -432,7 +432,7 @@ def test_reader_root_operand_grep_no_file_unaffected() -> None:
 
 
 def test_reader_root_operand_echo_string_not_gated() -> None:
-    """echo /etc/passwd with a set root -> allow (operand is a string, not a path, D-06)."""
+    """echo /etc/passwd with a set root -> allow (operand is a string, D-06)."""
     ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
     verdict = recognize_reader("echo /etc/passwd", ctx)
     assert verdict is not None
@@ -451,7 +451,7 @@ def test_reader_root_operand_printf_string_not_gated() -> None:
 
 
 def test_reader_root_no_path_operand_cat_stdin_allow() -> None:
-    """cat (no operand, reads stdin) with set roots -> allow (D-06 no-path unaffected)."""
+    """cat (no operand, stdin) with set roots -> allow (D-06 no-path unaffected)."""
     ctx = _root_ctx(frozenset({"/allowed"}), cwd="/work")
     verdict = recognize_reader("cat", ctx)
     assert verdict is not None

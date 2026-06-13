@@ -286,7 +286,7 @@ def test_sed_root_operand_script_not_gated_as_path() -> None:
 
 
 def test_sed_root_no_file_operand_stdin_allow() -> None:
-    """sed -n p (no file, reads stdin) with set root -> allow (D-06 no-path unaffected)."""
+    """sed -n p (no file, stdin) with set root -> allow (D-06 no-path unaffected)."""
     ctx = _sed_root_ctx(frozenset({"/allowed"}), cwd="/work")
     verdict = recognize_sed("sed -n p", ctx)
     assert verdict is not None
@@ -317,7 +317,7 @@ def test_sed_root_one_file_operand_outside_root_abstains() -> None:
 
 
 def test_sed_root_scope_ssh_relative_file_operand_abstains() -> None:
-    """With read_scope='ssh', a RELATIVE file operand abstains before resolution (SC#3)."""
+    """read_scope='ssh': a RELATIVE file operand abstains before resolution (SC#3)."""
     ctx = Context(
         cwd="/allowed",
         config=ResolvedConfig(
@@ -332,7 +332,7 @@ def test_sed_root_scope_ssh_relative_file_operand_abstains() -> None:
 
 
 def test_sed_root_scope_ssh_absolute_file_under_root_allows() -> None:
-    """With read_scope='ssh', an absolute file operand under ssh_allowed_roots -> allow."""
+    """read_scope='ssh': an absolute file operand under ssh_allowed_roots -> allow."""
     ctx = Context(
         cwd="/work",
         config=ResolvedConfig(
