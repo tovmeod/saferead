@@ -186,10 +186,12 @@ def _coerce_str_set(value: object, key: str) -> frozenset[str]:
     """
     if not isinstance(value, list):
         raise TypeError(f"{key} must be a list of strings, got {type(value).__name__}")
+    items: list[str] = []
     for item in value:
         if not isinstance(item, str):
             raise TypeError(f"{key} entries must be strings, got {type(item).__name__}")
-    return frozenset(value)
+        items.append(item)
+    return frozenset(items)
 
 
 def _coerce_path(value: object, key: str) -> Path:

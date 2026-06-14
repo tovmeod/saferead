@@ -36,8 +36,13 @@ Abstain-never-crash on any parse error or exception (D-15 / PKG-06).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ..config import _BUILTIN_PY_METHODS, _BUILTIN_PY_MODULES
 from ..verdict import Verdict
+
+if TYPE_CHECKING:
+    import ast
 
 # --- The three locked allowlists (D-01 / D-02 / D-03's planner deliverable) --
 
@@ -250,7 +255,7 @@ def _import_admitted(node: object, allowed_modules) -> bool:
 
 
 def _walk_is_read_only(
-    node: object, allowed_builtins, allowed_methods, allowed_modules
+    node: ast.AST, allowed_builtins, allowed_methods, allowed_modules
 ) -> bool:
     """One-pass allowlist walk; True only after the ENTIRE tree walks clean.
 

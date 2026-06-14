@@ -172,7 +172,7 @@ def test_python_fold_readonly_allows_end_to_end() -> None:
     auto-allows end-to-end through `engine.fold` (tag `"python"`). This is the
     MVP vertical-slice claim: the reader's `_SUBLANG_CMDS` dispatch goes LIVE.
     """
-    from safe_read_hook.engine import fold, Context
+    from safe_read_hook.engine import Context, fold
     from safe_read_hook.tokenizer import tokenize
 
     segments = tokenize('python -c "1+1"').segments
@@ -187,7 +187,7 @@ def test_python_fold_dangerous_abstains_end_to_end() -> None:
 
     Proves the analyzer's import gate works through the live path.
     """
-    from safe_read_hook.engine import fold, Context
+    from safe_read_hook.engine import Context, fold
     from safe_read_hook.tokenizer import tokenize
 
     segments = tokenize('python -c "import os"').segments
