@@ -1,15 +1,8 @@
-"""Exec-form PreToolUse entrypoint — the only place that touches I/O (D-08).
+"""Console-script entrypoint for sash (PKG-08, D-01).
 
-Deploy form: ``python3 ${CLAUDE_PROJECT_DIR}/hooks/safe_read_hook.py``.
-
-This thin wrapper owns ALL stdin/stdout JSON handling, the ``tool_name == "Bash"``
-gate, the ``hookSpecificOutput`` envelope, and the never-crash guarantee
-(CORE-06): any error is logged best-effort and swallowed so the hook emits
-nothing and exits 0, letting the normal permission flow proceed. The pure core
-(``tokenize`` + ``fold``) stays import-clean and I/O-free.
-
-This entrypoint is NOT wired live this phase — the seed remains the registered
-hook (D-14). It only ever emits allow or ask, never a denial.
+Relocated from hooks/safe_read_hook.py. Invoked as `sash` (console script),
+`python -m sash`, or via uvx. Never invoke argparse — argv dispatch is a single
+trivial check (D-06) placed before the stdin read.
 """
 
 from __future__ import annotations
@@ -51,24 +44,15 @@ def audit_log(path: Path, record: dict) -> None:
         pass
 
 
-# Deploy form is `python3 .../hooks/safe_read_hook.py`, which puts THIS file's
-# directory on sys.path[0]. Because this file is named safe_read_hook.py, it
-# would otherwise shadow the installed `safe_read_hook` PACKAGE — `import
-# safe_read_hook` would find this script (a plain module, not a package) and
-# `safe_read_hook.context` would fail. Drop the script's own directory so the
-# real installed package resolves.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != _HERE]
-
-# Import the pure core AFTER the sys.path de-shadow (E402/I001 intentional). The
-# imports are guarded so a missing/broken install degrades to a clean abstain
-# (emit nothing, exit 0) rather than a traceback — the CORE-06 never-crash
-# contract must hold for import failures too, not just runtime errors in main().
+# Import the pure core. The imports are guarded so a missing/broken install
+# degrades to a clean abstain (emit nothing, exit 0) rather than a traceback —
+# the CORE-06 never-crash contract must hold for import failures too, not just
+# runtime errors in main().
 try:
-    from sash.config import ResolvedConfig, resolve_config  # noqa: E402
-    from sash.context import Context  # noqa: E402
-    from sash.engine import fold  # noqa: E402
-    from sash.tokenizer import tokenize  # noqa: E402
+    from sash.config import ResolvedConfig, resolve_config
+    from sash.context import Context
+    from sash.engine import fold
+    from sash.tokenizer import tokenize
 except Exception:
     log("uncaught exception (core import failed):\n" + traceback.format_exc())
     sys.exit(0)
@@ -161,7 +145,20 @@ def _resolve_staged(cwd: str | None) -> list[str] | None:
 
 
 def main() -> None:
-    """Read a PreToolUse payload from stdin and emit a decision envelope, or nothing."""
+    """Read a PreToolUse payload from stdin and emit a decision envelope, or nothing.
+
+    Before the stdin read, a trivial argv dispatch (D-06) routes the ``install``
+    and ``update`` subcommands to their stubs (replaced by lazy imports in Plan
+    17-02). Bare invocation (no argv[1]) falls through to the hook path.
+    """
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1]
+        if cmd == "install":
+            print("install: not yet implemented")
+            return
+        elif cmd == "update":
+            print("update: not yet implemented")
+            return
     try:
         raw = sys.stdin.read()
         try:
@@ -216,10 +213,9 @@ def main() -> None:
         log("uncaught exception:\n" + traceback.format_exc())
 
 
-# Deploy runs this file as a script (`python3 .../safe_read_hook.py`), so
-# `__name__ == "__main__"` still fires — runtime behavior is unchanged. The
-# guard only stops `main()` auto-running when the entrypoint is imported (the
-# wiring test imports `_resolve_branch`/`main` to assert the Context resolver
-# identity without firing a live subprocess).
+# The guard stops `main()` auto-running when the entrypoint is imported (the
+# wiring tests import `_resolve_branch`/`main` to assert the Context resolver
+# identity without firing a live subprocess). `python -m sash` routes through
+# __main__.py, and the console script calls `sash.cli:main` directly.
 if __name__ == "__main__":
     main()

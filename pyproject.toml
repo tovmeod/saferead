@@ -11,6 +11,9 @@ license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 dependencies = ["pglast==7.14"]
 
+[project.scripts]
+sash = "sash.cli:main"
+
 [dependency-groups]
 dev = ["pytest>=9,<10"]
 
