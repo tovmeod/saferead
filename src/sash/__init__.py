@@ -1,4 +1,4 @@
-"""safe-read-hook: a Claude Code PreToolUse hook for safe read-only command approval.
+"""sash: a Claude Code PreToolUse hook for safe read-only command approval.
 
 This package is the Phase 1 scaffold and intentionally contains no decision logic,
 splitter, recognizers, or entrypoint. Those are added in Phase 2.

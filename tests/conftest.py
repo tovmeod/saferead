@@ -1,4 +1,4 @@
-"""Shared fixtures for the safe-read-hook test suite.
+"""Shared fixtures for the sash test suite.
 
 Provides sample PreToolUse payloads and a stub ``ask``-returning recognizer
 used by the engine tests (Plan 02) to exercise the ask tier and precedence.

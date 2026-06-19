@@ -1,6 +1,6 @@
 """Console-script entrypoint for sash (PKG-08, D-01).
 
-Relocated from hooks/safe_read_hook.py. Invoked as `sash` (console script),
+Invoked as `sash` (console script),
 `python -m sash`, or via uvx. Never invoke argparse — argv dispatch is a single
 trivial check (D-06) placed before the stdin read.
 """
@@ -61,13 +61,13 @@ except Exception:
 # The trusted GLOBAL config (D-01). Resolved once per invocation in _load_config;
 # a module constant so tests can repoint it at a temp file (mirrors the patchable
 # resolver seam). NOT a cached config object — only the path is module-level.
-_GLOBAL_CONFIG_PATH = Path.home() / ".config" / "claude-safe-hook" / "config.toml"
+_GLOBAL_CONFIG_PATH = Path.home() / ".config" / "sash" / "config.toml"
 
 
 def _project_config_path() -> Path | None:
     """Return the untrusted PROJECT config path, or None when it should be skipped.
 
-    Resolves ``$CLAUDE_PROJECT_DIR/.claude/safe-read-hook.toml`` (D-02 — a
+    Resolves ``$CLAUDE_PROJECT_DIR/.claude/sash.toml`` (D-01 — a
     standalone dotfile, NOT a ``pyproject.toml [tool.*]`` section). When
     ``CLAUDE_PROJECT_DIR`` is unset OR empty the project layer is SKIPPED ENTIRELY
     (returns None) — the planner-chosen D-03 behavior. Skipping is cardinal-safe:
@@ -78,7 +78,7 @@ def _project_config_path() -> Path | None:
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
     if not project_dir:
         return None
-    return Path(project_dir) / ".claude" / "safe-read-hook.toml"
+    return Path(project_dir) / ".claude" / "sash.toml"
 
 
 def _load_config() -> ResolvedConfig:
