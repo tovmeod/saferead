@@ -26,11 +26,11 @@ from __future__ import annotations
 
 import pytest
 
-from sash.config import ResolvedConfig, builtin_config
-from sash.context import Context
-from sash.engine import fold
-from sash.recognizers.ssh import recognize_ssh
-from sash.tokenizer import tokenize
+from saferead.config import ResolvedConfig, builtin_config
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.recognizers.ssh import recognize_ssh
+from saferead.tokenizer import tokenize
 
 
 @pytest.fixture
@@ -325,7 +325,7 @@ def test_ssh_scope_does_not_leak_to_outer_local_segment() -> None:
     """read_scope='ssh' set inside _fold_readonly_ssh must not affect the outer ctx."""
     # After recognize_ssh returns, a follow-up local read with local_allowed_roots
     # should still use local_allowed_roots (not ssh_allowed_roots).
-    from sash.recognizers.reader import recognize_reader
+    from saferead.recognizers.reader import recognize_reader
 
     cfg = _ssh_cfg(
         local_roots=frozenset({"/local/allowed"}),

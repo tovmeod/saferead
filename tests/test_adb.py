@@ -31,10 +31,10 @@ from __future__ import annotations
 
 import pytest
 
-from sash.context import Context
-from sash.engine import fold
-from sash.recognizers.adb import recognize_adb
-from sash.tokenizer import tokenize
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.recognizers.adb import recognize_adb
+from saferead.tokenizer import tokenize
 
 
 @pytest.fixture

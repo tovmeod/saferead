@@ -26,9 +26,9 @@ from dataclasses import replace
 
 import pytest
 
-from sash.config import builtin_config
-from sash.context import Context
-from sash.recognizers.python import recognize_python
+from saferead.config import builtin_config
+from saferead.context import Context
+from saferead.recognizers.python import recognize_python
 
 
 @pytest.fixture

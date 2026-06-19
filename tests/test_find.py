@@ -22,10 +22,10 @@ from __future__ import annotations
 
 import pytest
 
-from sash.config import ResolvedConfig
-from sash.context import Context
-from sash.engine import fold
-from sash.recognizers.find import recognize_find
+from saferead.config import ResolvedConfig
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.recognizers.find import recognize_find
 
 
 @pytest.fixture

@@ -27,9 +27,9 @@ from pathlib import Path
 
 import pytest
 
-from sash.context import Context
-from sash.engine import fold
-from sash.tokenizer import tokenize
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.tokenizer import tokenize
 
 #: The external checked-in golden fixture, loaded once at module scope.
 _GOLDEN = json.loads((Path(__file__).parent / "golden_decisions.json").read_text())

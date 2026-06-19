@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from sash.tokenizer import TokenizeResult, tokenize
+from saferead.tokenizer import TokenizeResult, tokenize
 
 # --- segmentation -------------------------------------------------------------
 

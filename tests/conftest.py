@@ -1,4 +1,4 @@
-"""Shared fixtures for the sash test suite.
+"""Shared fixtures for the saferead test suite.
 
 Provides sample PreToolUse payloads and a stub ``ask``-returning recognizer
 used by the engine tests (Plan 02) to exercise the ask tier and precedence.
@@ -10,9 +10,9 @@ import json
 
 import pytest
 
-from sash.context import Context
-from sash.recognizers import Recognizer
-from sash.verdict import Verdict
+from saferead.context import Context
+from saferead.recognizers import Recognizer
+from saferead.verdict import Verdict
 
 
 @pytest.fixture

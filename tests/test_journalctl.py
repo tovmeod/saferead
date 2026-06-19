@@ -26,8 +26,8 @@ from __future__ import annotations
 
 import pytest
 
-from sash.context import Context
-from sash.recognizers.journalctl import recognize_journalctl
+from saferead.context import Context
+from saferead.recognizers.journalctl import recognize_journalctl
 
 
 @pytest.fixture

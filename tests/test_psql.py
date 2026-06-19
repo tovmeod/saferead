@@ -29,10 +29,10 @@ from __future__ import annotations
 
 import pytest
 
-from sash.context import Context
-from sash.engine import fold
-from sash.recognizers.psql import recognize_psql
-from sash.tokenizer import tokenize
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.recognizers.psql import recognize_psql
+from saferead.tokenizer import tokenize
 
 
 @pytest.fixture

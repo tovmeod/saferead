@@ -112,7 +112,7 @@ wheels = [
 ]
 
 [[package]]
-name = "sash"
+name = "saferead"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

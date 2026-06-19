@@ -1,4 +1,4 @@
-"""Unit tests for the sash installer/updater (INST-01).
+"""Unit tests for the saferead installer/updater (INST-01).
 
 Covers idempotency, merge-preserve, backup creation, path-drift update, target
 selection, the lazy-import hot-path invariant, and best-effort update behavior.
@@ -10,7 +10,7 @@ import json
 import subprocess
 import sys
 
-from sash.install import _merge_hook, install_main, update_main
+from saferead.install import _merge_hook, install_main, update_main
 
 
 def _bash_hooks(data: dict) -> list:
@@ -21,13 +21,13 @@ def _bash_hooks(data: dict) -> list:
     return []
 
 
-def _sash_entries(data: dict) -> list:
-    return [h for h in _bash_hooks(data) if h.get("command", "").endswith("sash")]
+def _saferead_entries(data: dict) -> list:
+    return [h for h in _bash_hooks(data) if h.get("command", "").endswith("saferead")]
 
 
 def _install_to(monkeypatch, target) -> None:
     """Invoke install_main() with argv pointed at ``target`` (bare-path arg)."""
-    monkeypatch.setattr(sys, "argv", ["sash", "install", str(target)])
+    monkeypatch.setattr(sys, "argv", ["saferead", "install", str(target)])
     install_main()
 
 
@@ -36,10 +36,10 @@ def test_install_absent_settings_creates_fresh(monkeypatch, tmp_path) -> None:
     _install_to(monkeypatch, target)
 
     data = json.loads(target.read_text(encoding="utf-8"))
-    entries = _sash_entries(data)
+    entries = _saferead_entries(data)
     assert len(entries) == 1
     assert entries[0]["type"] == "command"
-    assert entries[0]["command"].endswith("sash")
+    assert entries[0]["command"].endswith("saferead")
 
 
 def test_install_idempotent_same_path(monkeypatch, tmp_path) -> None:
@@ -48,7 +48,7 @@ def test_install_idempotent_same_path(monkeypatch, tmp_path) -> None:
     _install_to(monkeypatch, target)  # second run = no-op
 
     data = json.loads(target.read_text(encoding="utf-8"))
-    assert len(_sash_entries(data)) == 1
+    assert len(_saferead_entries(data)) == 1
 
 
 def test_install_updates_stale_path(monkeypatch, tmp_path) -> None:
@@ -61,7 +61,7 @@ def test_install_updates_stale_path(monkeypatch, tmp_path) -> None:
                         {
                             "matcher": "Bash",
                             "hooks": [
-                                {"type": "command", "command": "/old/location/sash"}
+                                {"type": "command", "command": "/old/location/saferead"}
                             ],
                         }
                     ]
@@ -73,9 +73,9 @@ def test_install_updates_stale_path(monkeypatch, tmp_path) -> None:
     _install_to(monkeypatch, target)
 
     data = json.loads(target.read_text(encoding="utf-8"))
-    entries = _sash_entries(data)
+    entries = _saferead_entries(data)
     assert len(entries) == 1
-    assert entries[0]["command"] != "/old/location/sash"  # updated in place
+    assert entries[0]["command"] != "/old/location/saferead"  # updated in place
 
 
 def test_install_preserves_existing_hooks(monkeypatch, tmp_path) -> None:
@@ -102,8 +102,8 @@ def test_install_preserves_existing_hooks(monkeypatch, tmp_path) -> None:
     hooks = _bash_hooks(json.loads(target.read_text(encoding="utf-8")))
     commands = [h["command"] for h in hooks]
     assert "/usr/local/bin/dcg" in commands  # dcg preserved
-    assert commands[0] == "/usr/local/bin/dcg"  # dcg ordered before sash
-    assert any(c.endswith("sash") for c in commands)
+    assert commands[0] == "/usr/local/bin/dcg"  # dcg ordered before saferead
+    assert any(c.endswith("saferead") for c in commands)
 
 
 def test_install_backup_created(monkeypatch, tmp_path) -> None:
@@ -137,13 +137,13 @@ def test_merge_existing_bash_block_used(monkeypatch, tmp_path) -> None:
         e for e in data["hooks"]["PreToolUse"] if e.get("matcher") == "Bash"
     ]
     assert len(bash_blocks) == 1  # no duplicate Bash matcher
-    assert len(_sash_entries(data)) == 1
+    assert len(_saferead_entries(data)) == 1
 
 
 def test_merge_hook_returns_false_when_unchanged() -> None:
     data: dict = {}
-    assert _merge_hook(data, "/bin/sash") is True
-    assert _merge_hook(data, "/bin/sash") is False  # idempotent at unit level
+    assert _merge_hook(data, "/bin/saferead") is True
+    assert _merge_hook(data, "/bin/saferead") is False  # idempotent at unit level
 
 
 def test_update_uv_absent_does_not_raise(monkeypatch) -> None:
@@ -163,21 +163,21 @@ def test_update_timeout_does_not_raise(monkeypatch) -> None:
 
 
 def test_install_is_not_imported_on_hook_path() -> None:
-    """Importing sash.cli must NOT trigger importing sash.install (D-07 hot path).
+    """Importing saferead.cli must NOT trigger importing saferead.install (D-07 hot path).
 
     Runs in a fresh subprocess so it is unaffected by this test module having
-    already imported sash.install at the top level.
+    already imported saferead.install at the top level.
     """
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sash.cli, sys; "
-            "sys.exit(1 if 'sash.install' in sys.modules else 0)",
+            "import saferead.cli, sys; "
+            "sys.exit(1 if 'saferead.install' in sys.modules else 0)",
         ],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, (
-        f"sash.install was imported on the hook path: {result.stderr}"
+        f"saferead.install was imported on the hook path: {result.stderr}"
     )

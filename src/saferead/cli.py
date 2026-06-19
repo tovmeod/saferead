@@ -1,7 +1,7 @@
-"""Console-script entrypoint for sash (PKG-08, D-01).
+"""Console-script entrypoint for saferead (PKG-08, D-01).
 
-Invoked as `sash` (console script),
-`python -m sash`, or via uvx. Never invoke argparse — argv dispatch is a single
+Invoked as `saferead` (console script),
+`python -m saferead`, or via uvx. Never invoke argparse — argv dispatch is a single
 trivial check (D-06) placed before the stdin read.
 """
 
@@ -49,10 +49,10 @@ def audit_log(path: Path, record: dict) -> None:
 # the CORE-06 never-crash contract must hold for import failures too, not just
 # runtime errors in main().
 try:
-    from sash.config import ResolvedConfig, resolve_config
-    from sash.context import Context
-    from sash.engine import fold
-    from sash.tokenizer import tokenize
+    from saferead.config import ResolvedConfig, resolve_config
+    from saferead.context import Context
+    from saferead.engine import fold
+    from saferead.tokenizer import tokenize
 except Exception:
     log("uncaught exception (core import failed):\n" + traceback.format_exc())
     sys.exit(0)
@@ -61,13 +61,13 @@ except Exception:
 # The trusted GLOBAL config (D-01). Resolved once per invocation in _load_config;
 # a module constant so tests can repoint it at a temp file (mirrors the patchable
 # resolver seam). NOT a cached config object — only the path is module-level.
-_GLOBAL_CONFIG_PATH = Path.home() / ".config" / "sash" / "config.toml"
+_GLOBAL_CONFIG_PATH = Path.home() / ".config" / "saferead" / "config.toml"
 
 
 def _project_config_path() -> Path | None:
     """Return the untrusted PROJECT config path, or None when it should be skipped.
 
-    Resolves ``$CLAUDE_PROJECT_DIR/.claude/sash.toml`` (D-01 — a
+    Resolves ``$CLAUDE_PROJECT_DIR/.claude/saferead.toml`` (D-01 — a
     standalone dotfile, NOT a ``pyproject.toml [tool.*]`` section). When
     ``CLAUDE_PROJECT_DIR`` is unset OR empty the project layer is SKIPPED ENTIRELY
     (returns None) — the planner-chosen D-03 behavior. Skipping is cardinal-safe:
@@ -78,7 +78,7 @@ def _project_config_path() -> Path | None:
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
     if not project_dir:
         return None
-    return Path(project_dir) / ".claude" / "sash.toml"
+    return Path(project_dir) / ".claude" / "saferead.toml"
 
 
 def _load_config() -> ResolvedConfig:
@@ -154,12 +154,12 @@ def main() -> None:
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
         if cmd == "install":
-            from sash.install import install_main
+            from saferead.install import install_main
 
             install_main()
             return
         elif cmd == "update":
-            from sash.install import update_main
+            from saferead.install import update_main
 
             update_main()
             return
@@ -219,7 +219,7 @@ def main() -> None:
 
 # The guard stops `main()` auto-running when the entrypoint is imported (the
 # wiring tests import `_resolve_branch`/`main` to assert the Context resolver
-# identity without firing a live subprocess). `python -m sash` routes through
-# __main__.py, and the console script calls `sash.cli:main` directly.
+# identity without firing a live subprocess). `python -m saferead` routes through
+# __main__.py, and the console script calls `saferead.cli:main` directly.
 if __name__ == "__main__":
     main()

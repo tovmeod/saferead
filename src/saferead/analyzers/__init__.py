@@ -2,7 +2,7 @@
 
 A language *analyzer* has the contract ``analyze(source) -> Verdict | None``
 (D4-08): given an embedded-sublanguage source string, it returns a
-:class:`~sash.verdict.Verdict` or ``None`` to abstain. This mirrors
+:class:`~saferead.verdict.Verdict` or ``None`` to abstain. This mirrors
 the recognizer ``Callable`` contract (``recognizers/__init__.py``), but the
 analyzers live in a SEPARATE mapping keyed by language name — distinct from the
 ordered fold ``REGISTRY``: analyzers are dispatched by language (``ANALYZERS[

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from sash.config import (
+from saferead.config import (
     RawLayer,
     ResolvedConfig,
     builtin_config,
@@ -529,7 +529,7 @@ def test_python_global_replace_changes_effective_allowlist(tmp_path: Path) -> No
 
 def test_python_absent_key_falls_back_to_floor(tmp_path: Path) -> None:
     """PY-03: an absent [python] key resolves to the built-in floor, never empty."""
-    from sash.config import _BUILTIN_PY_METHODS, _BUILTIN_PY_MODULES
+    from saferead.config import _BUILTIN_PY_METHODS, _BUILTIN_PY_MODULES
 
     # A global that customizes only [git] — no [python] table at all.
     path = _write(tmp_path, '[git]\nprotected_branches = ["release"]\n')
@@ -571,11 +571,11 @@ def test_python_widen_while_gated_stays_narrow_same_merge(tmp_path: Path) -> Non
 
 def test_python_floor_parity_no_drift() -> None:
     """Drift guard: the analyzer floor == the config floor (single floor home)."""
-    from sash.analyzers.python_skeleton import (
+    from saferead.analyzers.python_skeleton import (
         _FLOOR_METHODS,
         _FLOOR_MODULES,
     )
-    from sash.config import _BUILTIN_PY_METHODS, _BUILTIN_PY_MODULES
+    from saferead.config import _BUILTIN_PY_METHODS, _BUILTIN_PY_MODULES
 
     assert _BUILTIN_PY_METHODS == _FLOOR_METHODS
     assert _BUILTIN_PY_MODULES == _FLOOR_MODULES
@@ -644,7 +644,7 @@ def test_read_root_floor_on_builtin_config_is_none() -> None:
 
 def test_read_root_widen_base_set_union_project_set(tmp_path: Path) -> None:
     """REC-08 D-01: base set | project set -> union (WIDEN; reads are not mutations)."""
-    from sash.config import ResolvedConfig
+    from saferead.config import ResolvedConfig
 
     base = ResolvedConfig(
         protected_branches=frozenset({"main"}),
@@ -672,7 +672,7 @@ def test_read_root_widen_none_base_project_set_stays_none(tmp_path: Path) -> Non
 
 def test_read_root_widen_base_set_project_absent_stays_base(tmp_path: Path) -> None:
     """REC-08 D-07: base=set, project absent -> base (additive identity)."""
-    from sash.config import ResolvedConfig
+    from saferead.config import ResolvedConfig
 
     base = ResolvedConfig(
         protected_branches=frozenset({"main"}),

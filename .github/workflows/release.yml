@@ -1,11 +1,11 @@
 name: Release
 
-# Publishes sash to PyPI via trusted publishing (OIDC) when a GitHub Release is
+# Publishes saferead to PyPI via trusted publishing (OIDC) when a GitHub Release is
 # published. No stored API token — OIDC is the only credential mechanism.
 #
 # ONE-TIME PyPI SETUP (required before cutting the first release):
-#   On pypi.org, add a pending trusted publisher for the sash project with:
-#     Owner: AvrahamS   Repository: sash
+#   On pypi.org, add a pending trusted publisher for the saferead project with:
+#     Owner: AvrahamS   Repository: saferead
 #     Workflow filename: release.yml   Environment name: pypi
 #   Optionally create a GitHub repo environment named "pypi"
 #   (Settings > Environments) to enable a required-reviewer approval gate.
@@ -42,8 +42,8 @@ jobs:
       - name: Type check (ty)
         run: uvx ty@0.0.40 check src
       - name: Build (sdist + wheel)
-        # rm -rf dist/ prevents a stale pre-rename safe_read_hook-*.whl from a
-        # cached checkout being uploaded (Pitfall 5).
+        # Clearing dist/ prevents a stale wheel from an earlier build under a
+        # prior package name from being uploaded (Pitfall 5).
         run: |
           rm -rf dist/
           uv build
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/sash
+      url: https://pypi.org/p/saferead
     # OIDC write privilege is scoped to THIS job only (Pitfall 2 — no top-level
     # permissions block, so the gate job gets no token-minting privilege).
     permissions:

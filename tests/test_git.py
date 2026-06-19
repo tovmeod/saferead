@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import pytest
 
-from sash.config import RawLayer, ResolvedConfig, builtin_config, merge
-from sash.context import Context
-from sash.engine import fold
-from sash.recognizers import REGISTRY
-from sash.recognizers.git import recognize_git
-from sash.verdict import Verdict
+from saferead.config import RawLayer, ResolvedConfig, builtin_config, merge
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.recognizers import REGISTRY
+from saferead.recognizers.git import recognize_git
+from saferead.verdict import Verdict
 
 
 @pytest.fixture

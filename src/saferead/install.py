@@ -1,8 +1,9 @@
-"""Installer and updater for sash (INST-01, D-07 lazy-imported off the hook path).
+"""Installer and updater for saferead (INST-01, D-07 lazy-imported off the hook path).
 
 Contains install_main() and update_main(). This module is imported ONLY on the
-`sash install` / `sash update` argv branches in sash.cli — never on the bare hook
-path, so the latency-sensitive decision path never pays its import cost.
+`saferead install` / `saferead update` argv branches in saferead.cli — never on
+the bare hook path, so the latency-sensitive decision path never pays its import
+cost.
 """
 
 from __future__ import annotations
@@ -17,14 +18,14 @@ from datetime import datetime
 from pathlib import Path
 
 
-def _detect_sash_path() -> str:
-    """Return the absolute path of the installed sash binary (D-09).
+def _detect_saferead_path() -> str:
+    """Return the absolute path of the installed saferead binary (D-09).
 
-    Prefers ``shutil.which("sash")`` (the console script on PATH); falls back to
+    Prefers ``shutil.which("saferead")`` (the console script on PATH); falls back to
     ``Path(sys.argv[0]).resolve()`` for invocation via the script directly. Both
     yield an absolute path suitable for an exec-form hook entry.
     """
-    found = shutil.which("sash")
+    found = shutil.which("saferead")
     if found:
         return str(Path(found).resolve())
     return str(Path(sys.argv[0]).resolve())
@@ -56,21 +57,22 @@ def _backup_settings(path: Path) -> None:
     try:
         shutil.copy2(path, backup)
     except Exception as e:
-        print(f"sash: warning — could not back up {path}: {e}")
+        print(f"saferead: warning — could not back up {path}: {e}")
 
 
-def _merge_hook(data: dict, sash_cmd: str) -> bool:
-    """Merge the sash exec-form hook entry into ``data``; return True if changed (D-13).
+def _merge_hook(data: dict, saferead_cmd: str) -> bool:
+    """Merge the saferead exec-form hook entry into ``data``; True if changed (D-13).
 
     Locates the ``PreToolUse`` block whose ``matcher`` is ``"Bash"`` (creating the
-    nesting when absent) and reconciles the sash entry by command basename:
+    nesting when absent) and reconciles the saferead entry by command basename:
 
-    - an existing ``sash`` entry at the SAME path -> no-op, return False
-    - an existing ``sash`` entry at a DIFFERENT path -> update in place, return True
-    - no ``sash`` entry -> append ``{"type":"command","command":sash_cmd}``, return True
+    - an existing ``saferead`` entry at the SAME path -> no-op, return False
+    - an existing ``saferead`` entry at a DIFFERENT path -> update in place, return True
+    - no ``saferead`` entry -> append ``{"type":"command","command":saferead_cmd}``
+      and return True
 
-    Existing non-sash entries (dcg, git-gate) are never touched (D-12). The
-    function never produces two entries with basename ``sash``.
+    Existing non-saferead entries (dcg, git-gate) are never touched (D-12). The
+    function never produces two entries with basename ``saferead``.
     """
     pretooluse = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
     block = None
@@ -83,12 +85,14 @@ def _merge_hook(data: dict, sash_cmd: str) -> bool:
         pretooluse.append(block)
     hooks = block.setdefault("hooks", [])
     for entry in hooks:
-        if isinstance(entry, dict) and Path(entry.get("command", "")).name == "sash":
-            if entry.get("command") == sash_cmd:
+        if not isinstance(entry, dict):
+            continue
+        if Path(entry.get("command", "")).name == "saferead":
+            if entry.get("command") == saferead_cmd:
                 return False
-            entry["command"] = sash_cmd
+            entry["command"] = saferead_cmd
             return True
-    hooks.append({"type": "command", "command": sash_cmd})
+    hooks.append({"type": "command", "command": saferead_cmd})
     return True
 
 
@@ -109,7 +113,7 @@ def _atomic_write(path: Path, data: dict) -> None:
             json.dump(data, f, indent=2)
         os.replace(tmp_name, path)
     except Exception as e:
-        print(f"sash: failed to write {path}: {e}")
+        print(f"saferead: failed to write {path}: {e}")
         if tmp_name is not None and os.path.exists(tmp_name):
             try:
                 os.unlink(tmp_name)
@@ -145,32 +149,32 @@ def _select_target(args: list[str]) -> Path:
 
 
 def install_main() -> None:
-    """Install the sash exec-form hook entry into the target settings.json (INST-01)."""
+    """Install the saferead exec-form hook entry into the target settings (INST-01)."""
     target = _select_target(sys.argv[2:])
     target.parent.mkdir(parents=True, exist_ok=True)
     data = _load_settings(target)
-    sash_cmd = _detect_sash_path()
-    changed = _merge_hook(data, sash_cmd)
+    saferead_cmd = _detect_saferead_path()
+    changed = _merge_hook(data, saferead_cmd)
     if changed:
         _backup_settings(target)  # backup before write (D-14)
         _atomic_write(target, data)
-        print(f"sash: installed to {target}")
+        print(f"saferead: installed to {target}")
     else:
-        print(f"sash: already installed at {sash_cmd} (no change)")
+        print(f"saferead: already installed at {saferead_cmd} (no change)")
 
 
 def update_main() -> None:
-    """Upgrade the installed sash via ``uv tool upgrade sash`` — best-effort (D-11).
+    """Upgrade installed saferead via ``uv tool upgrade saferead`` — best-effort (D-11).
 
     Runs the upgrade as an argv list (``shell=False`` — no injection surface; the
-    only argument is the literal ``"sash"``). uv absent (FileNotFoundError), a
+    only argument is the literal ``"saferead"``). uv absent (FileNotFoundError), a
     failed upgrade (CalledProcessError is not raised since check=False), or a hang
     (TimeoutExpired) are caught and reported as guidance; the updater NEVER
     tracebacks (CORE-06 abstain-never-crash posture).
     """
     try:
         result = subprocess.run(
-            ["uv", "tool", "upgrade", "sash"],
+            ["uv", "tool", "upgrade", "saferead"],
             shell=False,
             timeout=60,
             check=False,
@@ -178,13 +182,13 @@ def update_main() -> None:
             text=True,
         )
     except FileNotFoundError:
-        print("sash: uv not found — install via https://docs.astral.sh/uv/")
+        print("saferead: uv not found — install via https://docs.astral.sh/uv/")
         return
     except subprocess.TimeoutExpired:
-        print("sash: upgrade timed out — run `uv tool upgrade sash` manually")
+        print("saferead: upgrade timed out — run `uv tool upgrade saferead` manually")
         return
     except Exception as e:
-        print(f"sash: update failed ({e}) — run `uv tool upgrade sash` manually")
+        print(f"saferead: update failed ({e}) — run `uv tool upgrade saferead`")
         return
     if result.stdout:
         print(result.stdout, end="")

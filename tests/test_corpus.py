@@ -29,9 +29,9 @@ from __future__ import annotations
 
 import pytest
 
-from sash.context import Context
-from sash.engine import fold
-from sash.tokenizer import tokenize
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.tokenizer import tokenize
 
 #: The seven reproduced seed bypasses, VERBATIM from PITFALLS.md (D-20).
 _CORPUS = [

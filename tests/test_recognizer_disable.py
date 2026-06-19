@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import pytest
 
-from sash.config import ResolvedConfig, builtin_config
-from sash.context import Context
-from sash.engine import fold
-from sash.recognizers import REGISTRY
+from saferead.config import ResolvedConfig, builtin_config
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.recognizers import REGISTRY
 
 
 def _ctx(*, disabled: frozenset[str], resolver=None) -> Context:

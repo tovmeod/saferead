@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import pytest
 
-from sash.context import Context
-from sash.engine import fold
-from sash.recognizers.redirects import redirect_tail_is_safe
-from sash.tokenizer import tokenize
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.recognizers.redirects import redirect_tail_is_safe
+from saferead.tokenizer import tokenize
 
 
 @pytest.fixture

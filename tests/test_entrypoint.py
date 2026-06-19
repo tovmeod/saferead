@@ -1,6 +1,6 @@
 """End-to-end tests for the console-script entrypoint (PKG-05, PKG-08, CORE-06).
 
-Runs ``python -m sash`` as a real subprocess feeding a JSON payload on stdin and
+Runs ``python -m saferead`` as a real subprocess feeding a JSON payload on stdin and
 asserting the stdout envelope (or empty stdout). This exercises the whole
 vertical slice: stdin -> split -> fold -> envelope.
 """
@@ -16,18 +16,18 @@ import sys
 
 
 def _load_entrypoint_module():
-    """Import sash.cli as a module WITHOUT running main().
+    """Import saferead.cli as a module WITHOUT running main().
 
     The module guards its ``main()`` call behind ``if __name__ == '__main__'``,
     so importing it via the package machinery loads the module (and its
     ``_resolve_branch`` resolver) without firing a live subprocess.
     """
-    return importlib.import_module("sash.cli")
+    return importlib.import_module("saferead.cli")
 
 
 def _run(payload: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "sash"],
+        [sys.executable, "-m", "saferead"],
         input=payload,
         capture_output=True,
         text=True,
@@ -235,7 +235,7 @@ def test_entrypoint_absent_global_injects_builtin(monkeypatch, tmp_path) -> None
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
     module.main()
 
-    from sash.config import builtin_config
+    from saferead.config import builtin_config
 
     assert captured["config"] == builtin_config()
 
@@ -307,7 +307,7 @@ def test_entrypoint_malformed_global_degrades_to_builtin(monkeypatch, tmp_path) 
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
     module.main()  # must not raise
 
-    from sash.config import builtin_config
+    from saferead.config import builtin_config
 
     assert captured["config"] == builtin_config()
 
@@ -350,7 +350,7 @@ def test_entrypoint_project_dir_unset_skips_layer(monkeypatch, tmp_path) -> None
     Points the project-layer reader (parse_layer) at a spy and asserts it is
     NEVER called; the injected config equals the resolved global/built-in base.
     """
-    import sash.config as config_mod
+    import saferead.config as config_mod
 
     module = _load_entrypoint_module()
     # Absent global FILE -> built-in base.
@@ -369,7 +369,7 @@ def test_entrypoint_project_dir_unset_skips_layer(monkeypatch, tmp_path) -> None
 
     cfg = _capture_config_module(module, monkeypatch)
 
-    from sash.config import builtin_config
+    from saferead.config import builtin_config
 
     assert calls == [], "project layer must not be read when CLAUDE_PROJECT_DIR unset"
     assert cfg == builtin_config()
@@ -377,7 +377,7 @@ def test_entrypoint_project_dir_unset_skips_layer(monkeypatch, tmp_path) -> None
 
 def test_entrypoint_project_dir_empty_skips_layer(monkeypatch, tmp_path) -> None:
     """An EMPTY CLAUDE_PROJECT_DIR is treated like unset -> project layer skipped."""
-    import sash.config as config_mod
+    import saferead.config as config_mod
 
     module = _load_entrypoint_module()
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
@@ -391,7 +391,7 @@ def test_entrypoint_project_dir_empty_skips_layer(monkeypatch, tmp_path) -> None
 
     cfg = _capture_config_module(module, monkeypatch)
 
-    from sash.config import builtin_config
+    from saferead.config import builtin_config
 
     assert calls == []
     assert cfg == builtin_config()
@@ -404,7 +404,7 @@ def test_entrypoint_project_layer_narrows_legitimately(monkeypatch, tmp_path) ->
 
     project_dir = tmp_path / "repo"
     (project_dir / ".claude").mkdir(parents=True)
-    (project_dir / ".claude" / "sash.toml").write_text(
+    (project_dir / ".claude" / "saferead.toml").write_text(
         '[git]\nprotected_branches = ["release"]\n'
         '[recognizers]\ndisabled = ["pytest"]\n',
         encoding="utf-8",
@@ -444,7 +444,7 @@ def test_entrypoint_criterion3_project_cannot_escalate(monkeypatch, tmp_path) ->
     # has no remove/replace/enabled key), so it CANNOT drop main/commit/sed.
     project_dir = tmp_path / "hostile"
     (project_dir / ".claude").mkdir(parents=True)
-    (project_dir / ".claude" / "sash.toml").write_text(
+    (project_dir / ".claude" / "saferead.toml").write_text(
         "[git]\nprotected_branches = []\ngated_subcommands = []\n"
         "[recognizers]\ndisabled = []\n",
         encoding="utf-8",
@@ -476,7 +476,7 @@ def test_entrypoint_malformed_project_drops_to_base(monkeypatch, tmp_path) -> No
 
     project_dir = tmp_path / "repo"
     (project_dir / ".claude").mkdir(parents=True)
-    (project_dir / ".claude" / "sash.toml").write_text(
+    (project_dir / ".claude" / "saferead.toml").write_text(
         "this is not = valid = toml [[[", encoding="utf-8"
     )
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))
@@ -493,7 +493,7 @@ def test_entrypoint_malformed_project_drops_to_base(monkeypatch, tmp_path) -> No
 def test_entrypoint_uses_resolve_config(monkeypatch, tmp_path) -> None:
     """The entrypoint resolves config via the single never-raising resolve_config.
 
-    Spies on ``sash.config.resolve_config`` and asserts the entrypoint
+    Spies on ``saferead.config.resolve_config`` and asserts the entrypoint
     calls it exactly once with (global_path, project_path) — the single
     orchestrated call replacing the inline per-layer handling.
     """
@@ -524,11 +524,11 @@ def test_entrypoint_malformed_global_e2e_does_not_crash(tmp_path) -> None:
     """Real subprocess: a malformed GLOBAL config -> returncode 0, no traceback.
 
     Repoints HOME at a temp dir holding a malformed
-    ``~/.config/sash/config.toml`` and runs the hook as a real
+    ``~/.config/saferead/config.toml`` and runs the hook as a real
     subprocess on a ``git commit`` payload. Asserts returncode 0 and no traceback
     on stdout/stderr (CORE-06) — the never-crash contract end-to-end.
     """
-    cfg_dir = tmp_path / ".config" / "sash"
+    cfg_dir = tmp_path / ".config" / "saferead"
     cfg_dir.mkdir(parents=True)
     (cfg_dir / "config.toml").write_text(
         "this is not = valid = toml [[[", encoding="utf-8"
@@ -546,7 +546,7 @@ def test_entrypoint_malformed_global_e2e_does_not_crash(tmp_path) -> None:
         }
     )
     result = subprocess.run(
-        [sys.executable, "-m", "sash"],
+        [sys.executable, "-m", "saferead"],
         input=payload,
         capture_output=True,
         text=True,
@@ -597,7 +597,7 @@ def test_entrypoint_malformed_global_asks_on_main(monkeypatch, tmp_path) -> None
     monkeypatch.setattr("sys.stdout", out)
     module.main()  # must not raise
 
-    from sash.config import builtin_config
+    from saferead.config import builtin_config
 
     # Built-in floor restored (D-10 safe defaults).
     assert captured["config"] == builtin_config()
@@ -624,7 +624,7 @@ def test_entrypoint_malformed_project_keeps_global(monkeypatch, tmp_path) -> Non
 
     project_dir = tmp_path / "repo"
     (project_dir / ".claude").mkdir(parents=True)
-    (project_dir / ".claude" / "sash.toml").write_text(
+    (project_dir / ".claude" / "saferead.toml").write_text(
         "this is not = valid = toml [[[", encoding="utf-8"
     )
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))

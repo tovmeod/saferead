@@ -1,6 +1,6 @@
 """Tests for the pure decision fold: abstain-veto, precedence, and CORE-04.
 
-The registry-patch target is ``sash.engine.REGISTRY`` — ``fold`` does
+The registry-patch target is ``saferead.engine.REGISTRY`` — ``fold`` does
 ``from .recognizers import REGISTRY``, which binds the name in the engine's own
 namespace. Rebinding ``recognizers.REGISTRY`` would leave the engine pointing at
 the old list and the patch would silently misfire.
@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from sash.context import Context
-from sash.engine import fold
-from sash.recognizers.reader import recognize_reader
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.recognizers.reader import recognize_reader
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def test_empty_segments_abstain(ctx: Context) -> None:
 
 def test_precedence_ask_dominates_allow(ctx: Context, stub_ask, monkeypatch) -> None:
     # Registry must contain stub_ask, else "gitstub op" is unrecognized -> veto.
-    monkeypatch.setattr("sash.engine.REGISTRY", [recognize_reader, stub_ask])
+    monkeypatch.setattr("saferead.engine.REGISTRY", [recognize_reader, stub_ask])
     verdict = fold(["cat foo.txt", "gitstub op"], ctx)
     assert verdict is not None
     assert verdict.decision == "ask"
@@ -47,7 +47,7 @@ def test_precedence_ask_dominates_allow(ctx: Context, stub_ask, monkeypatch) -> 
 
 def test_registry_extension_point(ctx: Context, stub_ask, monkeypatch) -> None:
     # CORE-04: adding a recognizer is a REGISTRY list edit; fold is unchanged.
-    monkeypatch.setattr("sash.engine.REGISTRY", [recognize_reader, stub_ask])
+    monkeypatch.setattr("saferead.engine.REGISTRY", [recognize_reader, stub_ask])
     # A segment only stub_ask recognizes now resolves instead of vetoing.
     verdict = fold(["gitstub op"], ctx)
     assert verdict is not None
