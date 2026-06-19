@@ -1,40 +1,33 @@
-"""End-to-end tests for the exec-form entrypoint (PKG-05, CORE-06).
+"""End-to-end tests for the console-script entrypoint (PKG-05, PKG-08, CORE-06).
 
-Runs ``hooks/safe_read_hook.py`` as a real subprocess feeding a JSON payload on
-stdin and asserting the stdout envelope (or empty stdout). This exercises the
-whole vertical slice: stdin -> split -> fold -> envelope.
+Runs ``python -m sash`` as a real subprocess feeding a JSON payload on stdin and
+asserting the stdout envelope (or empty stdout). This exercises the whole
+vertical slice: stdin -> split -> fold -> envelope.
 """
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import io
 import json
 import os
 import subprocess
 import sys
-from pathlib import Path
-
-_HOOK = Path(__file__).resolve().parent.parent / "hooks" / "safe_read_hook.py"
 
 
 def _load_entrypoint_module():
-    """Import hooks/safe_read_hook.py as a module WITHOUT running main().
+    """Import sash.cli as a module WITHOUT running main().
 
-    The script guards its ``main()`` call behind ``if __name__ == '__main__'``,
-    so importing it under a non-``__main__`` name loads the module (and its
+    The module guards its ``main()`` call behind ``if __name__ == '__main__'``,
+    so importing it via the package machinery loads the module (and its
     ``_resolve_branch`` resolver) without firing a live subprocess.
     """
-    spec = importlib.util.spec_from_file_location("_entrypoint_under_test", _HOOK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module("sash.cli")
 
 
 def _run(payload: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(_HOOK)],
+        [sys.executable, "-m", "sash"],
         input=payload,
         capture_output=True,
         text=True,
@@ -553,7 +546,7 @@ def test_entrypoint_malformed_global_e2e_does_not_crash(tmp_path) -> None:
         }
     )
     result = subprocess.run(
-        [sys.executable, str(_HOOK)],
+        [sys.executable, "-m", "sash"],
         input=payload,
         capture_output=True,
         text=True,
