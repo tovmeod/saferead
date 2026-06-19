@@ -154,10 +154,14 @@ def main() -> None:
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
         if cmd == "install":
-            print("install: not yet implemented")
+            from sash.install import install_main
+
+            install_main()
             return
         elif cmd == "update":
-            print("update: not yet implemented")
+            from sash.install import update_main
+
+            update_main()
             return
     try:
         raw = sys.stdin.read()
