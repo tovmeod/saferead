@@ -58,7 +58,7 @@ that guarantee; when in doubt, abstain.
 | **GitHub Actions** | — | CI: lint + typecheck + test matrix | Standard for a single-maintainer OSS repo; free for public repos. |
 ### Project layout (src layout)
 ## How Claude Code hooks are packaged / deployed
-- **Exec form (recommended):** `"command": "python3", "args": ["${CLAUDE_PROJECT_DIR}/hooks/safe_read_hook.py"]`
+- **Exec form (recommended):** `"command": "sash"` (installed via `pip install sash` or `uvx sash`)
 - **Shell form:** single `command` string with pipes/`&&`; requires manual quoting.
 ## Rationale Summary (why these, briefly)
 - **~~stdlib-only runtime~~ (SUPERSEDED Phase 11)** — runtime deps now permitted (uvx); discipline that survives: small/justified/pinned, lazy-import on hot path, abstain-never-crash. Preserves zero-install deployability and keeps the

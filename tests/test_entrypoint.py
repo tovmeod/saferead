@@ -404,7 +404,7 @@ def test_entrypoint_project_layer_narrows_legitimately(monkeypatch, tmp_path) ->
 
     project_dir = tmp_path / "repo"
     (project_dir / ".claude").mkdir(parents=True)
-    (project_dir / ".claude" / "safe-read-hook.toml").write_text(
+    (project_dir / ".claude" / "sash.toml").write_text(
         '[git]\nprotected_branches = ["release"]\n'
         '[recognizers]\ndisabled = ["pytest"]\n',
         encoding="utf-8",
@@ -444,7 +444,7 @@ def test_entrypoint_criterion3_project_cannot_escalate(monkeypatch, tmp_path) ->
     # has no remove/replace/enabled key), so it CANNOT drop main/commit/sed.
     project_dir = tmp_path / "hostile"
     (project_dir / ".claude").mkdir(parents=True)
-    (project_dir / ".claude" / "safe-read-hook.toml").write_text(
+    (project_dir / ".claude" / "sash.toml").write_text(
         "[git]\nprotected_branches = []\ngated_subcommands = []\n"
         "[recognizers]\ndisabled = []\n",
         encoding="utf-8",
@@ -476,7 +476,7 @@ def test_entrypoint_malformed_project_drops_to_base(monkeypatch, tmp_path) -> No
 
     project_dir = tmp_path / "repo"
     (project_dir / ".claude").mkdir(parents=True)
-    (project_dir / ".claude" / "safe-read-hook.toml").write_text(
+    (project_dir / ".claude" / "sash.toml").write_text(
         "this is not = valid = toml [[[", encoding="utf-8"
     )
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))
@@ -524,11 +524,11 @@ def test_entrypoint_malformed_global_e2e_does_not_crash(tmp_path) -> None:
     """Real subprocess: a malformed GLOBAL config -> returncode 0, no traceback.
 
     Repoints HOME at a temp dir holding a malformed
-    ``~/.config/claude-safe-hook/config.toml`` and runs the hook as a real
+    ``~/.config/sash/config.toml`` and runs the hook as a real
     subprocess on a ``git commit`` payload. Asserts returncode 0 and no traceback
     on stdout/stderr (CORE-06) — the never-crash contract end-to-end.
     """
-    cfg_dir = tmp_path / ".config" / "claude-safe-hook"
+    cfg_dir = tmp_path / ".config" / "sash"
     cfg_dir.mkdir(parents=True)
     (cfg_dir / "config.toml").write_text(
         "this is not = valid = toml [[[", encoding="utf-8"
@@ -624,7 +624,7 @@ def test_entrypoint_malformed_project_keeps_global(monkeypatch, tmp_path) -> Non
 
     project_dir = tmp_path / "repo"
     (project_dir / ".claude").mkdir(parents=True)
-    (project_dir / ".claude" / "safe-read-hook.toml").write_text(
+    (project_dir / ".claude" / "sash.toml").write_text(
         "this is not = valid = toml [[[", encoding="utf-8"
     )
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))
