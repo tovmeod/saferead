@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import pytest
 
-from safe_read_hook.analyzers import ANALYZERS
-from safe_read_hook.analyzers.sql import analyze_sql
-from safe_read_hook.verdict import Verdict
+from sash.analyzers import ANALYZERS
+from sash.analyzers.sql import analyze_sql
+from sash.verdict import Verdict
 
 # --- ALLOW corpus: provably read-only single statements --------------------
 

@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import pytest
 
-from safe_read_hook.context import Context
-from safe_read_hook.engine import fold
-from safe_read_hook.recognizers.pytest_runner import recognize_pytest
+from sash.context import Context
+from sash.engine import fold
+from sash.recognizers.pytest_runner import recognize_pytest
 
 
 @pytest.fixture

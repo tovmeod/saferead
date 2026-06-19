@@ -28,9 +28,9 @@ from __future__ import annotations
 
 import pytest
 
-from safe_read_hook.context import Context
-from safe_read_hook.engine import fold
-from safe_read_hook.recognizers.gradle import recognize_gradle
+from sash.context import Context
+from sash.engine import fold
+from sash.recognizers.gradle import recognize_gradle
 
 
 @pytest.fixture

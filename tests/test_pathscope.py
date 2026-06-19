@@ -22,7 +22,7 @@ under_any_root:
 
 from __future__ import annotations
 
-from safe_read_hook.recognizers._pathscope import resolve_lexical, under_any_root
+from sash.recognizers._pathscope import resolve_lexical, under_any_root
 
 # ---------------------------------------------------------------------------
 # resolve_lexical

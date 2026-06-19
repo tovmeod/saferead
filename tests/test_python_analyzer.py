@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import pytest
 
-from safe_read_hook.analyzers import ANALYZERS
-from safe_read_hook.analyzers.python_skeleton import analyze_python
-from safe_read_hook.verdict import Verdict
+from sash.analyzers import ANALYZERS
+from sash.analyzers.python_skeleton import analyze_python
+from sash.verdict import Verdict
 
 # --- ALLOW corpus: provably read-only Python source -------------------------
 
@@ -172,8 +172,8 @@ def test_python_fold_readonly_allows_end_to_end() -> None:
     auto-allows end-to-end through `engine.fold` (tag `"python"`). This is the
     MVP vertical-slice claim: the reader's `_SUBLANG_CMDS` dispatch goes LIVE.
     """
-    from safe_read_hook.engine import Context, fold
-    from safe_read_hook.tokenizer import tokenize
+    from sash.engine import Context, fold
+    from sash.tokenizer import tokenize
 
     segments = tokenize('python -c "1+1"').segments
     verdict = fold(segments, Context(cwd="/x"))
@@ -187,8 +187,8 @@ def test_python_fold_dangerous_abstains_end_to_end() -> None:
 
     Proves the analyzer's import gate works through the live path.
     """
-    from safe_read_hook.engine import Context, fold
-    from safe_read_hook.tokenizer import tokenize
+    from sash.engine import Context, fold
+    from sash.tokenizer import tokenize
 
     segments = tokenize('python -c "import os"').segments
     verdict = fold(segments, Context(cwd="/x"))

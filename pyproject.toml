@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "safe-read-hook"
+name = "sash"
 version = "0.1.0"
 description = "Claude Code PreToolUse hook that auto-approves known-safe read-only shell commands."
 requires-python = ">=3.11"
@@ -18,7 +18,7 @@ dev = ["pytest>=9,<10"]
 testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/safe_read_hook"]
+packages = ["src/sash"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [".venv*", "dist", "*.egg-info", "__pycache__"]

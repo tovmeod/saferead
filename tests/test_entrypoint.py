@@ -242,7 +242,7 @@ def test_entrypoint_absent_global_injects_builtin(monkeypatch, tmp_path) -> None
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
     module.main()
 
-    from safe_read_hook.config import builtin_config
+    from sash.config import builtin_config
 
     assert captured["config"] == builtin_config()
 
@@ -314,7 +314,7 @@ def test_entrypoint_malformed_global_degrades_to_builtin(monkeypatch, tmp_path) 
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
     module.main()  # must not raise
 
-    from safe_read_hook.config import builtin_config
+    from sash.config import builtin_config
 
     assert captured["config"] == builtin_config()
 
@@ -357,7 +357,7 @@ def test_entrypoint_project_dir_unset_skips_layer(monkeypatch, tmp_path) -> None
     Points the project-layer reader (parse_layer) at a spy and asserts it is
     NEVER called; the injected config equals the resolved global/built-in base.
     """
-    import safe_read_hook.config as config_mod
+    import sash.config as config_mod
 
     module = _load_entrypoint_module()
     # Absent global FILE -> built-in base.
@@ -376,7 +376,7 @@ def test_entrypoint_project_dir_unset_skips_layer(monkeypatch, tmp_path) -> None
 
     cfg = _capture_config_module(module, monkeypatch)
 
-    from safe_read_hook.config import builtin_config
+    from sash.config import builtin_config
 
     assert calls == [], "project layer must not be read when CLAUDE_PROJECT_DIR unset"
     assert cfg == builtin_config()
@@ -384,7 +384,7 @@ def test_entrypoint_project_dir_unset_skips_layer(monkeypatch, tmp_path) -> None
 
 def test_entrypoint_project_dir_empty_skips_layer(monkeypatch, tmp_path) -> None:
     """An EMPTY CLAUDE_PROJECT_DIR is treated like unset -> project layer skipped."""
-    import safe_read_hook.config as config_mod
+    import sash.config as config_mod
 
     module = _load_entrypoint_module()
     monkeypatch.setattr(module, "_GLOBAL_CONFIG_PATH", tmp_path / "no-global.toml")
@@ -398,7 +398,7 @@ def test_entrypoint_project_dir_empty_skips_layer(monkeypatch, tmp_path) -> None
 
     cfg = _capture_config_module(module, monkeypatch)
 
-    from safe_read_hook.config import builtin_config
+    from sash.config import builtin_config
 
     assert calls == []
     assert cfg == builtin_config()
@@ -500,7 +500,7 @@ def test_entrypoint_malformed_project_drops_to_base(monkeypatch, tmp_path) -> No
 def test_entrypoint_uses_resolve_config(monkeypatch, tmp_path) -> None:
     """The entrypoint resolves config via the single never-raising resolve_config.
 
-    Spies on ``safe_read_hook.config.resolve_config`` and asserts the entrypoint
+    Spies on ``sash.config.resolve_config`` and asserts the entrypoint
     calls it exactly once with (global_path, project_path) — the single
     orchestrated call replacing the inline per-layer handling.
     """
@@ -604,7 +604,7 @@ def test_entrypoint_malformed_global_asks_on_main(monkeypatch, tmp_path) -> None
     monkeypatch.setattr("sys.stdout", out)
     module.main()  # must not raise
 
-    from safe_read_hook.config import builtin_config
+    from sash.config import builtin_config
 
     # Built-in floor restored (D-10 safe defaults).
     assert captured["config"] == builtin_config()

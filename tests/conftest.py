@@ -10,9 +10,9 @@ import json
 
 import pytest
 
-from safe_read_hook.context import Context
-from safe_read_hook.recognizers import Recognizer
-from safe_read_hook.verdict import Verdict
+from sash.context import Context
+from sash.recognizers import Recognizer
+from sash.verdict import Verdict
 
 
 @pytest.fixture

@@ -65,10 +65,10 @@ sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != _HERE]
 # (emit nothing, exit 0) rather than a traceback — the CORE-06 never-crash
 # contract must hold for import failures too, not just runtime errors in main().
 try:
-    from safe_read_hook.config import ResolvedConfig, resolve_config  # noqa: E402
-    from safe_read_hook.context import Context  # noqa: E402
-    from safe_read_hook.engine import fold  # noqa: E402
-    from safe_read_hook.tokenizer import tokenize  # noqa: E402
+    from sash.config import ResolvedConfig, resolve_config  # noqa: E402
+    from sash.context import Context  # noqa: E402
+    from sash.engine import fold  # noqa: E402
+    from sash.tokenizer import tokenize  # noqa: E402
 except Exception:
     log("uncaught exception (core import failed):\n" + traceback.format_exc())
     sys.exit(0)

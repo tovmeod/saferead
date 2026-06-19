@@ -23,10 +23,10 @@ from __future__ import annotations
 
 import pytest
 
-from safe_read_hook.config import ResolvedConfig
-from safe_read_hook.context import Context
-from safe_read_hook.engine import fold
-from safe_read_hook.recognizers.sed import recognize_sed
+from sash.config import ResolvedConfig
+from sash.context import Context
+from sash.engine import fold
+from sash.recognizers.sed import recognize_sed
 
 
 @pytest.fixture

@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from safe_read_hook.analyzers import ANALYZERS
-from safe_read_hook.config import ResolvedConfig
-from safe_read_hook.context import Context
-from safe_read_hook.recognizers.reader import recognize_reader
-from safe_read_hook.verdict import Verdict
+from sash.analyzers import ANALYZERS
+from sash.config import ResolvedConfig
+from sash.context import Context
+from sash.recognizers.reader import recognize_reader
+from sash.verdict import Verdict
 
 
 @pytest.fixture

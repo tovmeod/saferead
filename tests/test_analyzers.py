@@ -15,9 +15,9 @@ Three dimensions:
 
 from __future__ import annotations
 
-from safe_read_hook.analyzers import ANALYZERS
-from safe_read_hook.analyzers.python_skeleton import analyze_python
-from safe_read_hook.verdict import Verdict
+from sash.analyzers import ANALYZERS
+from sash.analyzers.python_skeleton import analyze_python
+from sash.verdict import Verdict
 
 # --- dispatch -------------------------------------------------------------
 
