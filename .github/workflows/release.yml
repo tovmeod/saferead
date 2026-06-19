@@ -1,0 +1,88 @@
+name: Release
+
+# Publishes sash to PyPI via trusted publishing (OIDC) when a GitHub Release is
+# published. No stored API token — OIDC is the only credential mechanism.
+#
+# ONE-TIME PyPI SETUP (required before cutting the first release):
+#   On pypi.org, add a pending trusted publisher for the sash project with:
+#     Owner: AvrahamS   Repository: sash
+#     Workflow filename: release.yml   Environment name: pypi
+#   Optionally create a GitHub repo environment named "pypi"
+#   (Settings > Environments) to enable a required-reviewer approval gate.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  # Gate mirrors ci.yml — keep in sync. OIDC cannot flow through a reusable
+  # workflow, so the gate steps are duplicated here, not factored out (Pitfall 1).
+  gate:
+    name: gate (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package (zero runtime deps)
+        run: uv pip install --system -e .
+      - name: Install test deps
+        run: uv pip install --system 'pytest>=9,<10'
+      - name: Test (pytest)
+        run: python -m pytest -q
+      - name: Lint (ruff check)
+        run: uvx ruff@0.15.15 check src
+      - name: Format check (ruff format --check)
+        run: uvx ruff@0.15.15 format --check src
+      - name: Type check (ty)
+        run: uvx ty@0.0.40 check src
+      - name: Build (sdist + wheel)
+        # rm -rf dist/ prevents a stale pre-rename safe_read_hook-*.whl from a
+        # cached checkout being uploaded (Pitfall 5).
+        run: |
+          rm -rf dist/
+          uv build
+      - name: Upload distributions
+        # Pure-Python wheel is version-independent; upload exactly once.
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: [gate]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/sash
+    # OIDC write privilege is scoped to THIS job only (Pitfall 2 — no top-level
+    # permissions block, so the gate job gets no token-minting privilege).
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Assert tag matches pyproject version
+        # Catch a tag/version drift before publishing (D-05).
+        run: |
+          VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          TAG="${GITHUB_REF_NAME}"
+          echo "pyproject version: $VERSION"
+          echo "release tag:       $TAG"
+          if [ "$TAG" != "$VERSION" ] && [ "$TAG" != "v$VERSION" ]; then
+            echo "ERROR: release tag '$TAG' does not match pyproject version '$VERSION'"
+            exit 1
+          fi
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
