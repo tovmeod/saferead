@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    name: gate (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      # A1: astral-sh/setup-uv@v6 is the assumed current tag; confirm at first CI run.
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Test (pytest)
+        # uv run provisions the matrix interpreter, installs the project (+ its
+        # pglast runtime dep) and the dev group (pytest) into an ephemeral env.
+        # `uv pip install --system` fails on GitHub runners (externally-managed
+        # system interpreter), so drive everything through uv run instead.
+        run: uv run --python ${{ matrix.python-version }} python -m pytest -q
+      - name: Lint (ruff check)
+        run: uvx ruff@0.15.15 check src
+      - name: Format check (ruff format --check)
+        run: uvx ruff@0.15.15 format --check src
+      - name: Type check (ty)
+        run: uvx ty@0.0.40 check src
+      - name: Build (sdist + wheel)
+        run: uv build
+
+  requires-python-floor:
+    name: requires-python floor (negative 3.10)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.10"
+      - name: Assert install is refused on Python 3.10
+        run: |
+          uv venv --python 3.10
+          if uv pip install -e . ; then
+            echo "ERROR: install succeeded on 3.10 but requires-python is >=3.11"
+            exit 1
+          fi
+          echo "OK: install correctly refused on 3.10"
