@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "saferead"
+version = "0.1.0"
+description = "Claude Code PreToolUse hook that auto-approves known-safe read-only shell commands."
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+dependencies = ["pglast==7.14"]
+
+[project.scripts]
+saferead = "saferead.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=9,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/saferead"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [".venv*", "dist", "*.egg-info", "__pycache__"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ty.environment]
+python-version = "3.11"
