@@ -1,0 +1,159 @@
+"""REC-06 boundary tests for the shared redirect-target helper (D-05).
+
+The cardinal point of these tests is the ALLOW/ABSTAIN boundary of
+``redirect_tail_is_safe``: a discard redirect and a genuine single-component
+``/tmp`` scratch write are safe (glued AND split shapes); a ``/tmp`` traversal
+(glued OR spaced), a second-slash target, a bare operator with no target, any
+non-``/tmp`` real-file target, the SAFETY-FLOOR append/combined-redirect forms,
+and any metacharacter target are all unsafe (the recognizer then abstains).
+
+A single live ``tokenize -> fold`` assertion pins the D-07 corpus flip:
+``echo x >/tmp/../etc/passwd`` folds to a non-allow decision through the real
+pipeline (the reader has always abstained on this via its ``>`` veto, and
+continues to after Task 2 routes through this helper).
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from saferead.context import Context
+from saferead.engine import fold
+from saferead.recognizers.redirects import redirect_tail_is_safe
+from saferead.tokenizer import tokenize
+
+
+@pytest.fixture
+def ctx() -> Context:
+    return Context(cwd="/x")
+
+
+# --- redirect ALLOW (safe) cases ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "arg_tokens",
+    [
+        # discard redirects (glued)
+        [">/dev/null"],
+        ["2>/dev/null"],
+        ["2>&1"],
+        ["&>/dev/null"],
+        ["&>>/dev/null"],
+        [">&2"],  # fd dup
+        ["1>&2"],  # fd dup, named source fd
+        # discard redirects (split)
+        [">", "/dev/null"],
+        ["2>", "/dev/null"],
+        # /tmp single-component scratch (glued)
+        [">/tmp/scratch"],
+        [">>/tmp/log"],  # append to scratch
+        ["2>/tmp/err"],
+        # /tmp single-component scratch (split)
+        [">", "/tmp/scratch"],
+        [">>", "/tmp/log"],
+        # WR-01: an arbitrary high fd-numbered redirect to a /tmp scratch target
+        # is admitted — the ``\d*`` operator head accepts any descriptor, and the
+        # target is still only a single-component /tmp write (within policy, not a
+        # false-allow). Pinned so the accepted fd surface is intentional.
+        ["3>/tmp/x"],
+        ["9>/tmp/x"],
+        ["10>/tmp/x"],
+        ["3>", "/tmp/x"],  # split form
+        # plain operands / flags with no redirect at all
+        [],
+        ["foo.txt"],
+        ["-l", "f"],
+        # mixed: an operand plus a safe redirect
+        ["x", ">/tmp/foo"],
+        ["x", ">", "/tmp/foo"],
+    ],
+)
+def test_redirect_tail_allow(arg_tokens: list[str]) -> None:
+    assert redirect_tail_is_safe(arg_tokens) is True
+
+
+# --- redirect ABSTAIN (unsafe) cases --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "arg_tokens",
+    [
+        # traversal — glued AND spaced (Pitfall 1)
+        [">/tmp/../etc/passwd"],
+        [">", "/tmp/../etc/passwd"],
+        # bare /tmp/.. component
+        [">/tmp/.."],
+        [">/tmp/."],
+        # second slash after /tmp/
+        [">/tmp/sub/file"],
+        # bare operator with no target
+        [">/tmp"],
+        [">"],
+        [">>"],
+        ["2>"],  # trailing split operator, no target
+        # non-/tmp real-file targets
+        [">file"],
+        [">out.txt"],
+        ["2>/etc/x"],
+        # WR-01: a high fd number does NOT bypass the target gate — a
+        # fd-numbered redirect to a real (non-/tmp, non-discard) file abstains.
+        ["3>/etc/passwd"],
+        ["9>out.txt"],
+        [">~/.bashrc"],
+        [">", "out.txt"],
+        # SAFETY FLOOR: append / combined-redirect to a real file
+        [">>/etc/passwd"],
+        [">&/etc/passwd"],  # combined-redirect to a FILE, NOT the >&N fd-dup
+        # metacharacter in target
+        [">/tmp/a;b"],
+        [">/tmp/a|b"],
+        # CR-01: a SECOND redirect operator glued into the /tmp target. In bash
+        # ``>/tmp/a>b`` is two redirects (stdout->/tmp/a, then stdout->relative
+        # file ``b`` in cwd — a real state mutation). The allowlist /tmp charset
+        # must reject ``>``/``<`` in the component so these fail closed.
+        [">/tmp/a>b"],
+        [">", "/tmp/a>b"],  # split form, same root cause
+        [">/tmp/a<b"],
+        [">/tmp/a>/etc/passwd"],  # absolute second target (was already blocked)
+        ["2>/tmp/a>b"],
+    ],
+)
+def test_redirect_tail_abstain(arg_tokens: list[str]) -> None:
+    assert redirect_tail_is_safe(arg_tokens) is False
+
+
+# --- live fold-path corpus flip (D-07) ------------------------------------
+
+
+def test_redirect_traversal_folds_non_allow(ctx: Context) -> None:
+    """D-07: ``echo x >/tmp/../etc/passwd`` folds to a non-allow decision.
+
+    Asserted through the real ``tokenize -> fold`` pipeline (not the helper in
+    isolation): the traversal vector never reaches ``allow``.
+    """
+    result = tokenize("echo x >/tmp/../etc/passwd")
+    assert result.abstain_reason is None
+    verdict = fold(result.segments, ctx)
+    assert verdict is None or verdict.decision != "allow"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo x >/tmp/a>b",
+        "find . -type f >/tmp/a>b",
+        "sed 's/a/b/' f >/tmp/a>b",
+    ],
+)
+def test_glued_second_redirect_folds_non_allow(command: str, ctx: Context) -> None:
+    """CR-01: a glued second redirect writes a real cwd file -> must never allow.
+
+    All three recognizers (reader/find/sed) delegate redirect safety to the one
+    shared helper, so a single allowlist-charset fix must close the cardinal
+    false-allow for every caller through the live ``tokenize -> fold`` path.
+    """
+    result = tokenize(command)
+    assert result.abstain_reason is None  # token reaches the helper
+    verdict = fold(result.segments, ctx)
+    assert verdict is None or verdict.decision != "allow"
