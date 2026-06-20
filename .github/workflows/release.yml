@@ -5,7 +5,7 @@ name: Release
 #
 # ONE-TIME PyPI SETUP (required before cutting the first release):
 #   On pypi.org, add a pending trusted publisher for the saferead project with:
-#     Owner: AvrahamS   Repository: saferead
+#     Owner: tovmeod   Repository: saferead
 #     Workflow filename: release.yml   Environment name: pypi
 #   Optionally create a GitHub repo environment named "pypi"
 #   (Settings > Environments) to enable a required-reviewer approval gate.
